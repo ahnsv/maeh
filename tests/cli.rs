@@ -11,7 +11,11 @@ fn maeh() -> Command {
         .env_remove("MAEH_NOW")
         .env_remove("MAEH_EPOCH")
         .env_remove("MAEH_DEBUG")
-        .env_remove("HERDR_ENV");
+        .env_remove("MAEH_BACKEND")
+        .env_remove("MAEH_HERDR_BIN")
+        .env_remove("MAEH_TMUX_BIN")
+        .env_remove("HERDR_ENV")
+        .env_remove("HERDR_SOCKET_PATH");
     cmd
 }
 
@@ -34,7 +38,7 @@ fn local_work_time() -> (u32, u32, bool) {
 #[test]
 fn help_output_is_styled_and_lists_core_commands() {
     maeh().arg("--help").assert().success().stdout(
-        "Typed orchestration CLI for hmph and Herdr agents\n\nUsage: maeh [--home PATH] <command>\n\nCommands:\n  init          create local state directories and config\n  config        path, show, or emit config\n  ledger        append or list JSONL spans\n  state         tag, untag, get, list, worktree, delete-slot\n  board-cache   put or get tracker board snapshots\n  capsule       put, get, or prompt compact task context\n  prompt        render kickoff prompts\n  statusline    print compact pool status\n  work-hours    evaluate configured work-hour guard\n  doctor        debug paths, config, backend, and env\n  selftest      validate local config/state readability\n",
+        "Typed orchestration CLI for hmph and Herdr agents\n\nUsage: maeh [--home PATH] <command>\n\nCommands:\n  init          create local state directories and config\n  config        path, show, or emit config\n  ledger        append or list JSONL spans\n  state         tag, untag, get, list, worktree, delete-slot\n  board-cache   put or get tracker board snapshots\n  capsule       put, get, or prompt compact task context\n  prompt        render kickoff prompts\n  backend       plan or dry-run backend discovery/reconciliation\n  statusline    print compact pool status\n  work-hours    evaluate configured work-hour guard\n  doctor        debug paths, config, backend, and env\n  selftest      validate local config/state readability\n",
     );
     maeh().args(["state", "--help"]).assert().success().stdout(
         "Manage local slot state\nUsage: maeh state <tag|untag|get|list|worktree|delete-slot>\n",
@@ -96,6 +100,22 @@ fn usage_errors_are_exact() {
         .assert()
         .failure()
         .stderr("maeh error: usage: unknown prompt command wat\n");
+    maeh()
+        .args(["backend", "wat"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: unknown backend command wat\n");
+    maeh()
+        .args(["config", "show"])
+        .env("MAEH_BACKEND", "wat")
+        .assert()
+        .failure()
+        .stderr("maeh error: backend: invalid backend: wat\n");
+    maeh()
+        .args(["backend", "discover", "--fixture", "x", "--exec"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: --fixture and --exec are mutually exclusive\n");
 }
 
 #[test]
@@ -134,7 +154,7 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!(
-            "maeh config\n  home: {0}\n  backend: auto\n  context switch cap: 3\n  review cap: 5\n  board ttl intake: 3600s\n  board ttl revamp: 10800s\n  capsule max chars: 1800\n  work hours: 9-17\n  workdays: 1,2,3,4,5\n",
+            "maeh config\n  home: {0}\n  backend: auto\n  requested backend: auto\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: tmux\n  context switch cap: 3\n  review cap: 5\n  board ttl intake: 3600s\n  board ttl revamp: 10800s\n  capsule max chars: 1800\n  work hours: 9-17\n  workdays: 1,2,3,4,5\n",
             home.display()
         ));
     maeh()
@@ -143,7 +163,7 @@ fn init_config_show_doctor_and_home_resolution() {
         .args(["config", "emit"])
         .assert()
         .success()
-        .stdout("MAEH_BACKEND=auto\nMAEH_CONTEXT_SWITCH_CAP=3\nMAEH_REVIEW_CAP=5\nMAEH_BOARD_TTL_INTAKE=3600\nMAEH_BOARD_TTL_REVAMP=10800\nMAEH_TASK_CAPSULE_MAX_CHARS=1800\n");
+        .stdout("MAEH_BACKEND=auto\nMAEH_HERDR_BIN=herdr\nMAEH_TMUX_BIN=tmux\nMAEH_CONTEXT_SWITCH_CAP=3\nMAEH_REVIEW_CAP=5\nMAEH_BOARD_TTL_INTAKE=3600\nMAEH_BOARD_TTL_REVAMP=10800\nMAEH_TASK_CAPSULE_MAX_CHARS=1800\n");
     maeh()
         .arg("--home")
         .arg(&home)
@@ -153,7 +173,18 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!(
-            "maeh doctor\n  home: {0}\n  config: ok\n  ledger: {0}/ledger\n  backend: auto\n  herdr: detected\n  maeh debug: on\n",
+            "maeh doctor\n  home: {0}\n  config: ok\n  ledger: {0}/ledger\n  backend: auto\n  selected backend: herdr\n  herdr: detected\n  maeh debug: on\n",
+            home.display()
+        ));
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .arg("doctor")
+        .env("HERDR_SOCKET_PATH", "/tmp/herdr.sock")
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh doctor\n  home: {0}\n  config: ok\n  ledger: {0}/ledger\n  backend: auto\n  selected backend: herdr\n  herdr: detected\n  maeh debug: off\n",
             home.display()
         ));
     let env_home = temp.path().join("env-home");
@@ -183,9 +214,143 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!(
-            "maeh doctor\n  home: {0}/missing\n  config: missing\n  ledger: {0}/missing/ledger\n  backend: auto\n  herdr: not-detected\n  maeh debug: off\n",
+            "maeh doctor\n  home: {0}/missing\n  config: missing\n  ledger: {0}/missing/ledger\n  backend: auto\n  selected backend: tmux\n  herdr: not-detected\n  maeh debug: off\n",
             temp.path().display()
         ));
+}
+
+#[test]
+fn backend_dry_run_reconciles_tmux_and_herdr_fixtures() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("state");
+    init_home(&home);
+    let plan_argv = "[\"tmux\",\"list-windows\",\"-a\",\"-F\",\"#{session_name}:#{window_index}\\u001f#{window_activity}\\u001f#{window_name}\\u001f#{@hmph_task}\\u001f#{@hmph_status}\\u001f#{@hmph_snooze_until}\\u001f#{pane_current_path}\"]";
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "plan"])
+        .assert()
+        .success()
+        .stdout(format!("maeh backend plan\n  requested backend: auto\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: tmux\nread\tdiscover\ttmux\tread backend state through adapter; no mutations\n  argv: {plan_argv}\n"));
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "discover"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "reconcile"])
+        .assert()
+        .success();
+    let exec_home = temp.path().join("exec-state");
+    init_home(&exec_home);
+    fs::write(
+        exec_home.join("config.toml"),
+        "backend = 'tmux'\ntmux_bin = '/bin/echo'\n",
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&exec_home)
+        .args(["backend", "discover", "--exec"])
+        .assert()
+        .success();
+    let fail_home = temp.path().join("fail-state");
+    init_home(&fail_home);
+    fs::write(
+        fail_home.join("config.toml"),
+        "backend = 'tmux'\ntmux_bin = '/usr/bin/false'\n",
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&fail_home)
+        .args(["backend", "discover", "--exec"])
+        .assert()
+        .failure()
+        .stderr("maeh error: backend: backend command failed: /usr/bin/false exited 1\n");
+    let tmux_fixture = temp.path().join("tmux.fixture");
+    fs::write(
+        &tmux_fixture,
+        "orch:1\u{1f}90\u{1f}task-a\u{1f}https://task\u{1f}active\u{1f}0\u{1f}/tmp/wt\n",
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "discover", "--fixture"])
+        .arg(&tmux_fixture)
+        .env("MAEH_EPOCH", "100")
+        .assert()
+        .success()
+        .stdout("maeh backend discover\n  requested backend: auto\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: tmux\norch:1\thttps://task\tactive\t0\t10\ttask-a\t/tmp/wt\torch:1.1\torch:1.2\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "tag", "orch:1", "task_url", "https://task"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "tag", "orch:2", "task_url", "https://missing"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "reconcile", "--fixture"])
+        .arg(&tmux_fixture)
+        .env("MAEH_EPOCH", "100")
+        .assert()
+        .success()
+        .stdout("maeh backend reconcile\n  requested backend: auto\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: tmux\nread\tok\torch:1\thttps://task status=active age=10s\nmutate\tmissing-live-slot\torch:2\tlocal state tracks https://missing; dry-run action is delete local slot or respawn explicitly\n");
+
+    let herdr_home = temp.path().join("herdr-state");
+    init_home(&herdr_home);
+    fs::write(herdr_home.join("config.toml"), "backend = 'herdr'\n").unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["backend", "plan"])
+        .assert()
+        .success()
+        .stdout("maeh backend plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\nread\tdiscover\therdr\tread backend state through adapter; no mutations\n  argv: [\"herdr\",\"api\",\"snapshot\"]\n");
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["state", "tag", "w1", "task_url", "https://herdr-task"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["state", "tag", "w1", "status", "active"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["state", "tag", "w1", "last_activity_epoch", "95"])
+        .assert()
+        .success();
+    let herdr_fixture = temp.path().join("herdr.fixture.json");
+    fs::write(
+        &herdr_fixture,
+        r#"{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1","label":"slot","worktree":{"checkout_path":"/tmp/hwt"}}],"panes":[{"workspace_id":"w1","pane_id":"w1:p2","agent":"primary"},{"workspace_id":"w1","pane_id":"w1:p3","agent":"critic"}]}}}"#,
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["backend", "discover", "--fixture"])
+        .arg(&herdr_fixture)
+        .env("MAEH_EPOCH", "100")
+        .assert()
+        .success()
+        .stdout("maeh backend discover\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\nw1\thttps://herdr-task\tactive\t0\t5\tslot\t/tmp/hwt\tw1:p2\tw1:p3\n");
 }
 
 #[test]

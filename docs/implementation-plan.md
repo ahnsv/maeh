@@ -23,10 +23,15 @@ Build `maeh`, a Rust CLI that turns the current hmph/Herdr shell-helper workflow
    - `doctor` prints home/config/ledger/backend/debug diagnostics.
    - `work-hours` evaluates the configured work-hour guard.
    - `selftest` validates local config/state readability.
-5. Verification
+5. Backend reconciliation seam
+   - `backend` config is typed as `auto|herdr|tmux`; `MAEH_BACKEND`, `MAEH_HERDR_BIN`, and `MAEH_TMUX_BIN` are the env override boundary.
+   - `backend plan` prints the read-only discovery command selected for the resolved backend.
+   - `backend discover` normalizes tmux format output or Herdr JSON snapshots into shared slot records using fixtures or explicit `--exec`.
+   - `backend reconcile` compares normalized backend records with local state and prints dry-run operation plans instead of mutating slots.
+6. Verification
    - Integration tests assert stdout, stderr, and exit codes for success and failure paths.
    - `cargo llvm-cov --all-targets --all-features --fail-under-lines 100 --fail-under-functions 100` enforces 100% line and function coverage.
 
 ## Boundary decision
 
-The first release keeps live tmux/Herdr process mutation outside the binary. The CLI owns the file-backed state, cache, ledger, prompt, and diagnostics layer that was most fragile in bash. Live workspace creation remains in the orchestrator loop until those shell-out boundaries can be migrated behind explicit command-runner tests.
+The first reconciliation slice keeps live tmux/Herdr mutation outside the default path. The CLI owns the file-backed state, cache, ledger, prompt, diagnostics, typed backend resolution, read-only discovery, and dry-run reconciliation layer that was most fragile in bash. Live workspace creation, prompt delivery into panes, and post-spawn verification remain in the orchestrator loop until those boundaries can be migrated behind the adapter + injected command-runner tests without shared-resource teardown risk.
