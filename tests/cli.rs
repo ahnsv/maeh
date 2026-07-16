@@ -176,6 +176,17 @@ fn init_config_show_doctor_and_home_resolution() {
             "maeh doctor\n  home: {0}\n  config: ok\n  ledger: {0}/ledger\n  backend: auto\n  selected backend: herdr\n  herdr: detected\n  maeh debug: on\n",
             home.display()
         ));
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .arg("doctor")
+        .env("HERDR_SOCKET_PATH", "/tmp/herdr.sock")
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh doctor\n  home: {0}\n  config: ok\n  ledger: {0}/ledger\n  backend: auto\n  selected backend: herdr\n  herdr: detected\n  maeh debug: off\n",
+            home.display()
+        ));
     let env_home = temp.path().join("env-home");
     maeh()
         .env("MAEH_HOME", &env_home)

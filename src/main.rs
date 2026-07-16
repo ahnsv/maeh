@@ -244,11 +244,15 @@ fn read_config(home: &Path) -> Result<Config> {
 }
 
 fn backend_settings_for_config(config: &Config) -> Result<BackendSettings> {
+    backend_settings_for_config_env(config, &BackendEnv::from_env()?)
+}
+
+fn backend_settings_for_config_env(config: &Config, env: &BackendEnv) -> Result<BackendSettings> {
     Ok(BackendSettings::resolve(
         config.backend,
         &config.herdr_bin,
         &config.tmux_bin,
-        &BackendEnv::from_env()?,
+        env,
     ))
 }
 
@@ -644,13 +648,14 @@ fn kickoff_prompt(url: &str, capsule_file: Option<&Path>) -> Result<()> {
 
 fn doctor(home: &Path) -> Result<()> {
     let config = read_config(home)?;
-    let settings = backend_settings_for_config(&config)?;
+    let backend_env = BackendEnv::from_env()?;
+    let settings = backend_settings_for_config_env(&config, &backend_env)?;
     let config_state = if config_path(home).exists() {
         "ok"
     } else {
         "missing"
     };
-    let herdr_state = if std::env::var_os("HERDR_ENV").is_some() {
+    let herdr_state = if backend_env.herdr_session {
         "detected"
     } else {
         "not-detected"
