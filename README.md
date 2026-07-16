@@ -5,6 +5,44 @@ fragile bash helper surface with a typed command interface, structured output,
 local tracker caches, compact task capsules, and a small doctor command for
 operator debugging.
 
+## Install
+
+Install the latest released binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ahnsv/maeh/main/install.sh | bash
+```
+
+The release workflow also publishes the installer as a release asset, so this
+works after the next tagged release that includes `install.sh`:
+
+```bash
+curl -fsSL https://github.com/ahnsv/maeh/releases/latest/download/install.sh | bash
+```
+
+The repository is public, so no GitHub token is required. By default the
+installer writes `maeh` to `~/.local/bin` and verifies the binary against the
+release checksum before installing it. Use `--dir` to choose another location:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ahnsv/maeh/main/install.sh | bash -s -- --dir /usr/local/bin
+```
+
+Pin a release with `MAEH_VERSION` or `--version`:
+
+```bash
+MAEH_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/ahnsv/maeh/main/install.sh | bash
+# or
+curl -fsSL https://raw.githubusercontent.com/ahnsv/maeh/main/install.sh | bash -s -- --version v0.1.0
+```
+
+Verify:
+
+```bash
+maeh --help
+maeh doctor
+```
+
 ## Commands
 
 ```text
@@ -35,7 +73,7 @@ maeh selftest
 - per-loop board cache TTLs matching the orchestration cadence
 - explicit doctor output for path/config/backend debugging
 
-See `docs/bash-helper-parity.md` for the mapped Bash helper surface.
+See `docs/bash-helper-parity.md` for the mapped Bash helper surface and `docs/installation.md` for install options.
 
 ## Development
 
