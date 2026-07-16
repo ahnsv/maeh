@@ -59,6 +59,10 @@ maeh board-cache get --key intake
 maeh capsule put <url> --edited <timestamp> < capsule.json
 maeh capsule prompt <url>
 maeh prompt kickoff --url <task-url>
+maeh backend plan
+maeh backend discover --fixture <adapter-output>
+maeh backend reconcile --fixture <adapter-output>
+maeh backend reconcile --exec
 maeh statusline
 maeh work-hours
 maeh doctor
@@ -72,8 +76,10 @@ maeh selftest
 - compact task capsules so agents do not repeatedly pull full Notion/Linear/Jira context
 - per-loop board cache TTLs matching the orchestration cadence
 - explicit doctor output for path/config/backend debugging
+- typed backend resolution for `auto|herdr|tmux`, with `MAEH_BACKEND`, `MAEH_HERDR_BIN`, and `MAEH_TMUX_BIN` as 12-factor overrides
+- dry-run backend discovery/reconciliation that normalizes tmux and Herdr state before planning any mutations
 
-See `docs/bash-helper-parity.md` for the mapped Bash helper surface and `docs/installation.md` for install options.
+See `docs/bash-helper-parity.md` for the mapped Bash helper surface, including the remaining shell-bound spawn/kickoff/verify gaps, and `docs/installation.md` for install options.
 
 ## Development
 

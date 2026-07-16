@@ -11,6 +11,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 
+use maeh::backend::{
+    adapter_for, print_operations, print_slots, BackendEnv, BackendKind, BackendSettings,
+    RealRunner, ReconciliationService,
+};
+
 #[derive(Debug, Error)]
 enum MaehError {
     #[error("io: {0}")]
@@ -25,6 +30,8 @@ enum MaehError {
     CacheMiss(String),
     #[error("capsule too large: {actual} chars > {max} chars")]
     CapsuleTooLarge { actual: usize, max: usize },
+    #[error("backend: {0}")]
+    Backend(#[from] maeh::backend::BackendError),
     #[error("usage: {0}")]
     Usage(String),
 }
@@ -33,8 +40,11 @@ type Result<T> = std::result::Result<T, MaehError>;
 type State = BTreeMap<String, BTreeMap<String, String>>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
 struct Config {
-    backend: String,
+    backend: BackendKind,
+    herdr_bin: String,
+    tmux_bin: String,
     context_switch_cap: u64,
     review_cap: u64,
     board_ttl_intake_secs: u64,
@@ -48,7 +58,9 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            backend: "auto".to_string(),
+            backend: BackendKind::Auto,
+            herdr_bin: "herdr".to_string(),
+            tmux_bin: "tmux".to_string(),
             context_switch_cap: 3,
             review_cap: 5,
             board_ttl_intake_secs: 3_600,
@@ -99,6 +111,7 @@ fn dispatch(home: &Path, args: &mut Vec<String>) -> Result<()> {
         "board-cache" => board_cache_command(home, args),
         "capsule" => capsule_command(home, args),
         "prompt" => prompt_command(args),
+        "backend" => backend_command(home, args),
         "statusline" => statusline(home),
         "work-hours" => work_hours(home),
         "doctor" => doctor(home),
@@ -120,6 +133,7 @@ fn print_help() {
     println!("  board-cache   put or get tracker board snapshots");
     println!("  capsule       put, get, or prompt compact task context");
     println!("  prompt        render kickoff prompts");
+    println!("  backend       plan or dry-run backend discovery/reconciliation");
     println!("  statusline    print compact pool status");
     println!("  work-hours    evaluate configured work-hour guard");
     println!("  doctor        debug paths, config, backend, and env");
@@ -229,11 +243,33 @@ fn read_config(home: &Path) -> Result<Config> {
     }
 }
 
+fn backend_settings_for_config(config: &Config) -> Result<BackendSettings> {
+    Ok(BackendSettings::resolve(
+        config.backend,
+        &config.herdr_bin,
+        &config.tmux_bin,
+        &BackendEnv::from_env()?,
+    ))
+}
+
+fn backend_settings(home: &Path) -> Result<BackendSettings> {
+    backend_settings_for_config(&read_config(home)?)
+}
+
+fn print_backend_resolution(settings: &BackendSettings) {
+    println!("  requested backend: {}", settings.requested);
+    println!("  selected backend: {}", settings.selected);
+    println!("  herdr bin: {}", settings.herdr_bin);
+    println!("  tmux bin: {}", settings.tmux_bin);
+}
+
 fn show_config(home: &Path) -> Result<()> {
     let config = read_config(home)?;
+    let settings = backend_settings_for_config(&config)?;
     println!("maeh config");
     println!("  home: {}", display(home));
     println!("  backend: {}", config.backend);
+    print_backend_resolution(&settings);
     println!("  context switch cap: {}", config.context_switch_cap);
     println!("  review cap: {}", config.review_cap);
     println!("  board ttl intake: {}s", config.board_ttl_intake_secs);
@@ -250,6 +286,8 @@ fn show_config(home: &Path) -> Result<()> {
 fn emit_config(home: &Path) -> Result<()> {
     let config = read_config(home)?;
     println!("MAEH_BACKEND={}", config.backend);
+    println!("MAEH_HERDR_BIN={}", config.herdr_bin);
+    println!("MAEH_TMUX_BIN={}", config.tmux_bin);
     println!("MAEH_CONTEXT_SWITCH_CAP={}", config.context_switch_cap);
     println!("MAEH_REVIEW_CAP={}", config.review_cap);
     println!("MAEH_BOARD_TTL_INTAKE={}", config.board_ttl_intake_secs);
@@ -259,6 +297,59 @@ fn emit_config(home: &Path) -> Result<()> {
         config.task_capsule_max_chars
     );
     Ok(())
+}
+
+fn backend_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
+    let command = take_arg(args, "backend command")?;
+    let fixture = flag_value(args, "--fixture", "")?;
+    let exec = flag_present(args, "--exec");
+    if exec && !fixture.is_empty() {
+        return Err(MaehError::Usage(
+            "--fixture and --exec are mutually exclusive".to_string(),
+        ));
+    }
+    let settings = backend_settings(home)?;
+    let adapter = adapter_for(&settings);
+    let service = ReconciliationService::new(adapter.as_ref());
+    println!("maeh backend {command}");
+    print_backend_resolution(&settings);
+    match command.as_str() {
+        "plan" => print_operations(&service.discovery_plan()),
+        "discover" => {
+            if fixture.is_empty() && !exec {
+                print_operations(&service.discovery_plan());
+            } else {
+                let slots = backend_discover(home, adapter.as_ref(), &service, &fixture)?;
+                print_slots(&slots);
+            }
+        }
+        "reconcile" => {
+            if fixture.is_empty() && !exec {
+                print_operations(&service.discovery_plan());
+            } else {
+                let slots = backend_discover(home, adapter.as_ref(), &service, &fixture)?;
+                let operations = service.reconcile(&read_state(home)?, &slots);
+                print_operations(&operations);
+            }
+        }
+        other => return Err(MaehError::Usage(format!("unknown backend command {other}"))),
+    }
+    Ok(())
+}
+
+fn backend_discover(
+    home: &Path,
+    adapter: &dyn maeh::backend::BackendAdapter,
+    service: &ReconciliationService<'_>,
+    fixture: &str,
+) -> Result<Vec<maeh::backend::BackendSlot>> {
+    let state = read_state(home)?;
+    if !fixture.is_empty() {
+        let raw = fs::read_to_string(fixture)?;
+        return Ok(adapter.parse_discovery(&raw, &state, now_epoch())?);
+    }
+    let mut runner = RealRunner;
+    Ok(service.discover_with_runner(&mut runner, &state, now_epoch())?)
 }
 
 fn ledger_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
@@ -553,6 +644,7 @@ fn kickoff_prompt(url: &str, capsule_file: Option<&Path>) -> Result<()> {
 
 fn doctor(home: &Path) -> Result<()> {
     let config = read_config(home)?;
+    let settings = backend_settings_for_config(&config)?;
     let config_state = if config_path(home).exists() {
         "ok"
     } else {
@@ -573,6 +665,7 @@ fn doctor(home: &Path) -> Result<()> {
     println!("  config: {config_state}");
     println!("  ledger: {}", display(&ledger_dir(home)));
     println!("  backend: {}", config.backend);
+    println!("  selected backend: {}", settings.selected);
     println!("  herdr: {herdr_state}");
     println!("  maeh debug: {debug_state}");
     Ok(())
