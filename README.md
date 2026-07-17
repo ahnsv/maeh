@@ -63,6 +63,24 @@ maeh backend plan
 maeh backend discover --fixture <adapter-output>
 maeh backend reconcile --fixture <adapter-output>
 maeh backend reconcile --exec
+maeh backend list-task-slots  # slot task_url status snooze_until age_secs label primary_pane critic_pane worktree
+maeh backend list-worktrees
+maeh worktree plan --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor
+maeh worktree open --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create
+maeh slot spawn --backend herdr --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --task-url https://example/task --editor false --exec
+maeh slot verify w1
+maeh slot close w1 --exec
+maeh slot worktree-remove w1 --exec
+maeh slot count --status active,blocked
+maeh slot snooze w1 --days 1 --status blocked
+maeh slot block w1 --reason "waiting"
+maeh spawn plan --slot w1 --task-url https://example/task --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor
+maeh spawn run --slot w1 --task-url https://example/task --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor
+maeh agent deliver w1:p2 "Do the task" --exec
+maeh kickoff plan --target w1:p2 --prompt "Do the task"
+maeh kickoff run --slot w1 --prompt "Do the task"
+maeh verify prompt --before "› Do the task" --after "Working" --prompt "Do the task"
+maeh status list
 maeh statusline
 maeh work-hours
 maeh doctor
@@ -76,10 +94,13 @@ maeh selftest
 - compact task capsules so agents do not repeatedly pull full Notion/Linear/Jira context
 - per-loop board cache TTLs matching the orchestration cadence
 - explicit doctor output for path/config/backend debugging
-- typed backend resolution for `auto|herdr|tmux`, with `MAEH_BACKEND`, `MAEH_HERDR_BIN`, and `MAEH_TMUX_BIN` as 12-factor overrides
-- dry-run backend discovery/reconciliation that normalizes tmux and Herdr state before planning any mutations
+- typed backend resolution for `auto|herdr|tmux`, with `MAEH_BACKEND`, `MAEH_HERDR_BIN`, `MAEH_TMUX_BIN`, and `MAEH_TMUX_SESSION` as 12-factor overrides
+- layout and harness configuration via config/env (`include_editor`, `MAEH_INCLUDE_EDITOR`, `MAEH_PRIMARY_AGENT_CMD`, `MAEH_CRITIC_AGENT_CMD`, `MAEH_EDITOR_CMD`)
+- dry-run backend discovery/reconciliation that normalizes tmux and Herdr state before planning mutations
+- live worktree/workspace open, primary/critic spawn, slot lifecycle/status/cleanup/revamp/cap wrappers, and worktree removal through Herdr/tmux adapters
+- backend-neutral prompt delivery policy with explicit submit/Enter events and safe Codex trust/update/continue handling
 
-See `docs/bash-helper-parity.md` for the mapped Bash helper surface, including the remaining shell-bound spawn/kickoff/verify gaps, and `docs/installation.md` for install options.
+See `docs/bash-helper-parity.md` for the mapped Bash helper surface and `docs/installation.md` for install options.
 
 ## Development
 
