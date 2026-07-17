@@ -11,6 +11,7 @@
 
 ## Agent-safe command rules
 
+- Follow the CLI Guidelines contract used by this repo: no-argument output is concise, `-h`/`--help` is complete, examples are in help text, command output goes to stdout, and errors/diagnostics go to stderr.
 - Prefer read-only context commands first: `plan`, `list`, `inspect`, `verify`, `status`, `doctor`, `selftest`.
 - Treat commands with `--exec`, `open`, `run`, `close`, or `worktree-remove` as mutating backend actions.
 - Outputs are stable plain text and intentionally asserted in tests; parse exact rows instead of scraping prose.

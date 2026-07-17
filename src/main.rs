@@ -98,6 +98,10 @@ fn run(args: Vec<OsString>) -> Result<()> {
         .into_iter()
         .map(|arg| arg.to_string_lossy().to_string())
         .collect::<Vec<_>>();
+    if args.is_empty() {
+        print_concise_help();
+        return Ok(());
+    }
     if args
         .first()
         .is_some_and(|arg| arg == "--help" || arg == "-h")
@@ -144,10 +148,32 @@ fn dispatch(home: &Path, args: &mut Vec<String>) -> Result<()> {
     }
 }
 
+fn print_concise_help() {
+    println!("Typed orchestration CLI for hmph and Herdr agents");
+    println!();
+    println!("Usage: maeh [--home PATH] <command>");
+    println!();
+    println!("Examples:");
+    println!("  maeh init");
+    println!("  maeh doctor");
+    println!();
+    println!("Run `maeh --help` for the full command list.");
+}
+
 fn print_help() {
     println!("Typed orchestration CLI for hmph and Herdr agents");
     println!();
     println!("Usage: maeh [--home PATH] <command>");
+    println!();
+    println!("Examples:");
+    println!("  maeh init");
+    println!("  maeh backend list-task-slots");
+    println!("  maeh prompt kickoff --url <task-url>");
+    println!("  maeh doctor");
+    println!();
+    println!("Options:");
+    println!("  -h, --help     print help");
+    println!("  --home PATH    use alternate state directory (defaults to MAEH_HOME or ~/.maeh)");
     println!();
     println!("Commands:");
     println!("  init          create local state directories and config");
@@ -175,8 +201,9 @@ fn print_help() {
     println!("  selftest      validate local config/state readability");
     println!();
     println!("Notes:");
-    println!("  Outputs are stable, line-oriented, and safe for agents to parse.");
+    println!("  Outputs are stable, line-oriented, and safe for humans and agents to parse.");
     println!("  Prefer plan/list/inspect commands; live backend mutations require --exec.");
+    println!("  Success output goes to stdout; errors and diagnostics go to stderr.");
 }
 
 fn print_state_help() {

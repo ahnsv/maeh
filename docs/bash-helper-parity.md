@@ -48,7 +48,7 @@ Prompt delivery policy is backend-neutral: pane text plus queued prompt becomes 
 
 ## LLM usage contract
 
-Agents should start with `maeh --help`, then use this table as the authoritative command map. Prefer `plan`, `list`, `inspect`, `verify`, and `status` commands when gathering context; backend mutations are intentionally visible through `--exec` flags or verbs like `open`, `run`, and `close`.
+Agents should start with `maeh --help`, then use this table as the authoritative command map. The help surface follows the relevant [CLI Guidelines](https://clig.dev/) expectations: concise output when run without arguments, full `-h`/`--help`, example invocations, option descriptions, stdout for command output, and stderr for errors/diagnostics. Prefer `plan`, `list`, `inspect`, `verify`, and `status` commands when gathering context; backend mutations are intentionally visible through `--exec` flags or verbs like `open`, `run`, and `close`.
 
 Stable surfaces for LLM automation:
 
