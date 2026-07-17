@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use assert_cmd::Command;
@@ -11,7 +13,17 @@ fn maeh() -> Command {
         .env_remove("MAEH_NOW")
         .env_remove("MAEH_EPOCH")
         .env_remove("MAEH_DEBUG")
-        .env_remove("HERDR_ENV");
+        .env_remove("MAEH_BACKEND")
+        .env_remove("MAEH_HERDR_BIN")
+        .env_remove("MAEH_TMUX_BIN")
+        .env_remove("MAEH_TMUX_SESSION")
+        .env_remove("MAEH_INCLUDE_EDITOR")
+        .env_remove("MAEH_FOCUS")
+        .env_remove("MAEH_PRIMARY_AGENT_CMD")
+        .env_remove("MAEH_CRITIC_AGENT_CMD")
+        .env_remove("MAEH_EDITOR_CMD")
+        .env_remove("HERDR_ENV")
+        .env_remove("HERDR_SOCKET_PATH");
     cmd
 }
 
@@ -24,6 +36,13 @@ fn init_home(home: &Path) {
         .success();
 }
 
+#[cfg(unix)]
+fn make_executable(path: &Path) {
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).unwrap();
+}
+
 fn local_work_time() -> (u32, u32, bool) {
     let now = chrono::Local::now();
     let dow = now.weekday().number_from_monday();
@@ -34,7 +53,7 @@ fn local_work_time() -> (u32, u32, bool) {
 #[test]
 fn help_output_is_styled_and_lists_core_commands() {
     maeh().arg("--help").assert().success().stdout(
-        "Typed orchestration CLI for hmph and Herdr agents\n\nUsage: maeh [--home PATH] <command>\n\nCommands:\n  init          create local state directories and config\n  config        path, show, or emit config\n  ledger        append or list JSONL spans\n  state         tag, untag, get, list, worktree, delete-slot\n  board-cache   put or get tracker board snapshots\n  capsule       put, get, or prompt compact task context\n  prompt        render kickoff prompts\n  statusline    print compact pool status\n  work-hours    evaluate configured work-hour guard\n  doctor        debug paths, config, backend, and env\n  selftest      validate local config/state readability\n",
+        "Typed orchestration CLI for hmph and Herdr agents\n\nUsage: maeh [--home PATH] <command>\n\nCommands:\n  init          create local state directories and config\n  config        path, show, or emit config\n  ledger        append or list JSONL spans\n  state         tag, untag, get, list, worktree, delete-slot\n  board-cache   put or get tracker board snapshots\n  capsule       put, get, or prompt compact task context\n  prompt        render kickoff prompts\n  backend       plan or dry-run backend discovery/reconciliation\n  worktree      plan or open backend worktrees/workspaces\n  spawn         plan or run worktree plus primary/critic agents\n  kickoff       plan or deliver queued prompts to agent panes\n  verify        verify prompt execution evidence\n  statusline    print compact pool status\n  work-hours    evaluate configured work-hour guard\n  doctor        debug paths, config, backend, and env\n  selftest      validate local config/state readability\n",
     );
     maeh().args(["state", "--help"]).assert().success().stdout(
         "Manage local slot state\nUsage: maeh state <tag|untag|get|list|worktree|delete-slot>\n",
@@ -96,6 +115,47 @@ fn usage_errors_are_exact() {
         .assert()
         .failure()
         .stderr("maeh error: usage: unknown prompt command wat\n");
+    maeh()
+        .args(["backend", "wat"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: unknown backend command wat\n");
+    maeh()
+        .args(["worktree", "wat"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: unknown worktree command wat\n");
+    maeh()
+        .args(["worktree", "plan"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: --slot needs a value\n");
+    maeh()
+        .args(["spawn", "wat"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: unknown spawn command wat\n");
+    maeh()
+        .args(["kickoff", "wat", "--target", "p"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: unknown kickoff command wat\n");
+    maeh()
+        .args(["verify", "wat"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: unknown verify command wat\n");
+    maeh()
+        .args(["config", "show"])
+        .env("MAEH_BACKEND", "wat")
+        .assert()
+        .failure()
+        .stderr("maeh error: backend: invalid backend: wat\n");
+    maeh()
+        .args(["backend", "discover", "--fixture", "x", "--exec"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: --fixture and --exec are mutually exclusive\n");
 }
 
 #[test]
@@ -134,7 +194,7 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!(
-            "maeh config\n  home: {0}\n  backend: auto\n  context switch cap: 3\n  review cap: 5\n  board ttl intake: 3600s\n  board ttl revamp: 10800s\n  capsule max chars: 1800\n  work hours: 9-17\n  workdays: 1,2,3,4,5\n",
+            "maeh config\n  home: {0}\n  backend: auto\n  requested backend: auto\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\n  include editor: true\n  focus: false\n  primary agent cmd: codex\n  critic agent cmd: codex\n  editor cmd: vi\n  context switch cap: 3\n  review cap: 5\n  board ttl intake: 3600s\n  board ttl revamp: 10800s\n  capsule max chars: 1800\n  work hours: 9-17\n  workdays: 1,2,3,4,5\n",
             home.display()
         ));
     maeh()
@@ -143,7 +203,26 @@ fn init_config_show_doctor_and_home_resolution() {
         .args(["config", "emit"])
         .assert()
         .success()
-        .stdout("MAEH_BACKEND=auto\nMAEH_CONTEXT_SWITCH_CAP=3\nMAEH_REVIEW_CAP=5\nMAEH_BOARD_TTL_INTAKE=3600\nMAEH_BOARD_TTL_REVAMP=10800\nMAEH_TASK_CAPSULE_MAX_CHARS=1800\n");
+        .stdout("MAEH_BACKEND=auto\nMAEH_HERDR_BIN=herdr\nMAEH_TMUX_BIN=tmux\nMAEH_TMUX_SESSION=maeh\nMAEH_INCLUDE_EDITOR=true\nMAEH_FOCUS=false\nMAEH_PRIMARY_AGENT_CMD=codex\nMAEH_CRITIC_AGENT_CMD=codex\nMAEH_EDITOR_CMD=vi\nMAEH_CONTEXT_SWITCH_CAP=3\nMAEH_REVIEW_CAP=5\nMAEH_BOARD_TTL_INTAKE=3600\nMAEH_BOARD_TTL_REVAMP=10800\nMAEH_TASK_CAPSULE_MAX_CHARS=1800\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["config", "show"])
+        .env("MAEH_INCLUDE_EDITOR", "false")
+        .env("MAEH_FOCUS", "true")
+        .env("MAEH_PRIMARY_AGENT_CMD", "agent primary")
+        .env("MAEH_CRITIC_AGENT_CMD", "agent critic")
+        .env("MAEH_EDITOR_CMD", "ed")
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["config", "show"])
+        .env("MAEH_INCLUDE_EDITOR", "maybe")
+        .env("MAEH_FOCUS", "off")
+        .assert()
+        .success();
     maeh()
         .arg("--home")
         .arg(&home)
@@ -153,7 +232,18 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!(
-            "maeh doctor\n  home: {0}\n  config: ok\n  ledger: {0}/ledger\n  backend: auto\n  herdr: detected\n  maeh debug: on\n",
+            "maeh doctor\n  home: {0}\n  config: ok\n  ledger: {0}/ledger\n  backend: auto\n  selected backend: herdr\n  herdr: detected\n  maeh debug: on\n",
+            home.display()
+        ));
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .arg("doctor")
+        .env("HERDR_SOCKET_PATH", "/tmp/herdr.sock")
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh doctor\n  home: {0}\n  config: ok\n  ledger: {0}/ledger\n  backend: auto\n  selected backend: herdr\n  herdr: detected\n  maeh debug: off\n",
             home.display()
         ));
     let env_home = temp.path().join("env-home");
@@ -183,9 +273,497 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!(
-            "maeh doctor\n  home: {0}/missing\n  config: missing\n  ledger: {0}/missing/ledger\n  backend: auto\n  herdr: not-detected\n  maeh debug: off\n",
+            "maeh doctor\n  home: {0}/missing\n  config: missing\n  ledger: {0}/missing/ledger\n  backend: auto\n  selected backend: tmux\n  herdr: not-detected\n  maeh debug: off\n",
             temp.path().display()
         ));
+}
+
+#[test]
+fn backend_dry_run_reconciles_tmux_and_herdr_fixtures() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("state");
+    init_home(&home);
+    let plan_argv = "[\"tmux\",\"list-windows\",\"-t\",\"maeh\",\"-a\",\"-F\",\"#{session_name}:#{window_index}\\u001f#{window_activity}\\u001f#{window_name}\\u001f#{@hmph_task}\\u001f#{@hmph_status}\\u001f#{@hmph_snooze_until}\\u001f#{pane_current_path}\"]";
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "plan"])
+        .assert()
+        .success()
+        .stdout(format!("maeh backend plan\n  requested backend: auto\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nread\tdiscover\ttmux\tread backend state through adapter; no mutations\n  argv: {plan_argv}\n"));
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "discover"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "reconcile"])
+        .assert()
+        .success();
+    let exec_home = temp.path().join("exec-state");
+    init_home(&exec_home);
+    fs::write(
+        exec_home.join("config.toml"),
+        "backend = 'tmux'\ntmux_bin = '/bin/echo'\n",
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&exec_home)
+        .args(["backend", "discover", "--exec"])
+        .assert()
+        .success();
+    let fail_home = temp.path().join("fail-state");
+    init_home(&fail_home);
+    fs::write(
+        fail_home.join("config.toml"),
+        "backend = 'tmux'\ntmux_bin = '/usr/bin/false'\n",
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&fail_home)
+        .args(["backend", "discover", "--exec"])
+        .assert()
+        .failure()
+        .stderr("maeh error: backend: backend command failed: /usr/bin/false exited 1\n");
+    let tmux_fixture = temp.path().join("tmux.fixture");
+    fs::write(
+        &tmux_fixture,
+        "orch:1\u{1f}90\u{1f}task-a\u{1f}https://task\u{1f}active\u{1f}0\u{1f}/tmp/wt\n",
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "discover", "--fixture"])
+        .arg(&tmux_fixture)
+        .env("MAEH_EPOCH", "100")
+        .assert()
+        .success()
+        .stdout("maeh backend discover\n  requested backend: auto\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\norch:1\thttps://task\tactive\t0\t10\ttask-a\t/tmp/wt\t\t\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "tag", "orch:1", "task_url", "https://task"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "tag", "orch:2", "task_url", "https://missing"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["backend", "reconcile", "--fixture"])
+        .arg(&tmux_fixture)
+        .env("MAEH_EPOCH", "100")
+        .assert()
+        .success()
+        .stdout("maeh backend reconcile\n  requested backend: auto\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nread\tok\torch:1\thttps://task status=active age=10s\nmutate\tmissing-live-slot\torch:2\tlocal state tracks https://missing; dry-run action is delete local slot or respawn explicitly\n");
+
+    let herdr_home = temp.path().join("herdr-state");
+    init_home(&herdr_home);
+    fs::write(herdr_home.join("config.toml"), "backend = 'herdr'\n").unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["backend", "plan"])
+        .assert()
+        .success()
+        .stdout("maeh backend plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nread\tdiscover\therdr\tread backend state through adapter; no mutations\n  argv: [\"herdr\",\"api\",\"snapshot\"]\n");
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["state", "tag", "w1", "task_url", "https://herdr-task"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["state", "tag", "w1", "status", "active"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["state", "tag", "w1", "last_activity_epoch", "95"])
+        .assert()
+        .success();
+    let herdr_fixture = temp.path().join("herdr.fixture.json");
+    fs::write(
+        &herdr_fixture,
+        r#"{"result":{"snapshot":{"workspaces":[{"workspace_id":"w1","label":"slot","worktree":{"checkout_path":"/tmp/hwt"}}],"panes":[{"workspace_id":"w1","pane_id":"w1:p2","agent":"primary"},{"workspace_id":"w1","pane_id":"w1:p3","agent":"critic"}]}}}"#,
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&herdr_home)
+        .args(["backend", "discover", "--fixture"])
+        .arg(&herdr_fixture)
+        .env("MAEH_EPOCH", "100")
+        .assert()
+        .success()
+        .stdout("maeh backend discover\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nw1\thttps://herdr-task\tactive\t0\t5\tslot\t/tmp/hwt\tw1:p2\tw1:p3\n");
+}
+
+#[test]
+fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("state");
+    init_home(&home);
+    let herdr = temp.path().join("fake-herdr");
+    let herdr_log = temp.path().join("herdr.log");
+    let worktree = temp.path().join("wt");
+    fs::write(
+        &herdr,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MAEH_FAKE_LOG\"\nif [ \"$1\" = worktree ]; then printf '{\"result\":{\"workspace_id\":\"w7\",\"path\":\"%s\"}}\\n' \"$MAEH_FAKE_WORKTREE\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = start ]; then case \"$3\" in primary) pane='w7:p2';; critic) pane='w7:p3';; *) pane='w7:p1';; esac; printf '{\"result\":{\"pane_id\":\"%s\"}}\\n' \"$pane\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = read ]; then printf '%s\\n' '{\"result\":{\"read\":{\"text\":\"ready\\n› \"}}}'; exit 0; fi\nprintf '{}\\n'\n",
+    )
+    .unwrap();
+    make_executable(&herdr);
+    fs::write(
+        home.join("config.toml"),
+        format!(
+            "backend = 'herdr'\nherdr_bin = '{}'\ninclude_editor = false\nprimary_agent_cmd = 'codex primary'\ncritic_agent_cmd = 'codex critic'\n",
+            herdr.display()
+        ),
+    )
+    .unwrap();
+
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "worktree",
+            "plan",
+            "--slot",
+            "w7",
+            "--repo",
+            "/repo",
+            "--branch",
+            "ha",
+            "--base",
+            "main",
+            "--path",
+        ])
+        .arg(&worktree)
+        .args(["--label", "live", "--create", "--no-editor", "--no-focus"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh worktree plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tworktree-create\tw7\tcreate Herdr worktree/workspace\n  argv: [\"{0}\",\"worktree\",\"create\",\"--cwd\",\"/repo\",\"--branch\",\"ha\",\"--base\",\"main\",\"--path\",\"{1}\",\"--label\",\"live\",\"--no-focus\",\"--json\"]\n",
+            herdr.display(),
+            worktree.display()
+        ));
+
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "worktree", "open", "--slot", "w7", "--repo", "/repo", "--branch", "ha",
+            "--base", "main", "--path",
+        ])
+        .arg(&worktree)
+        .args(["--label", "live", "--create", "--no-editor"])
+        .env("MAEH_FAKE_LOG", &herdr_log)
+        .env("MAEH_FAKE_WORKTREE", &worktree)
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh worktree open\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nworktree opened\n  slot: w7\n  workspace: w7\n  path: {1}\n",
+            herdr.display(),
+            worktree.display()
+        ));
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "get", "w7", "workspace_id"])
+        .assert()
+        .success()
+        .stdout("w7\n");
+
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "spawn", "plan", "--slot", "w7", "--repo", "/repo", "--branch", "ha",
+            "--base", "main", "--path",
+        ])
+        .arg(&worktree)
+        .args(["--label", "live", "--create", "--task-url", "https://task", "--no-editor"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh spawn plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tworktree-create\tw7\tcreate Herdr worktree/workspace\n  argv: [\"{0}\",\"worktree\",\"create\",\"--cwd\",\"/repo\",\"--branch\",\"ha\",\"--base\",\"main\",\"--path\",\"{1}\",\"--label\",\"live\",\"--no-focus\",\"--json\"]\nmutate\tprimary-agent\tw7\tstart primary agent\n  argv: [\"{0}\",\"agent\",\"start\",\"primary\",\"--cwd\",\"{1}\",\"--workspace\",\"$workspace\",\"--split\",\"right\",\"--no-focus\",\"--\",\"codex\",\"primary\"]\nmutate\tcritic-agent\tw7\tstart critic agent\n  argv: [\"{0}\",\"agent\",\"start\",\"critic\",\"--cwd\",\"{1}\",\"--workspace\",\"$workspace\",\"--split\",\"down\",\"--no-focus\",\"--\",\"codex\",\"critic\"]\n",
+            herdr.display(),
+            worktree.display()
+        ));
+
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "spawn", "run", "--slot", "w7", "--repo", "/repo", "--branch", "ha",
+            "--base", "main", "--path",
+        ])
+        .arg(&worktree)
+        .args(["--label", "live", "--create", "--task-url", "https://task", "--no-editor"])
+        .env("MAEH_FAKE_LOG", &herdr_log)
+        .env("MAEH_FAKE_WORKTREE", &worktree)
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh spawn run\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nworktree opened\n  slot: w7\n  workspace: w7\n  path: {1}\n  primary pane: w7:p2\n  critic pane: w7:p3\n",
+            herdr.display(),
+            worktree.display()
+        ));
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "get", "w7", "primary_pane"])
+        .assert()
+        .success()
+        .stdout("w7:p2\n");
+
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "spawn", "run", "--slot", "w8", "--repo", "/repo", "--branch", "ha2", "--base", "main",
+            "--path",
+        ])
+        .arg(&worktree)
+        .args([
+            "--label",
+            "live-editor",
+            "--create",
+            "--task-url",
+            "https://task2",
+            "--with-editor",
+            "--focus",
+            "--editor-cmd",
+            "vi",
+        ])
+        .env("MAEH_FAKE_LOG", &herdr_log)
+        .env("MAEH_FAKE_WORKTREE", &worktree)
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "get", "w8", "editor_pane"])
+        .assert()
+        .success()
+        .stdout("w7:p1\n");
+
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["kickoff", "plan", "--target", "w7:p2", "--pane-text", "ready\n› ", "--prompt", "Do it"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsend-text\tw7:p2\tsend 5 chars plus explicit Enter\n  argv: [\"{0}\",\"agent\",\"send\",\"w7:p2\",\"Do it\"]\nmutate\tsubmit-enter\tw7:p2\tsend 5 chars plus explicit Enter\n  argv: [\"{0}\",\"pane\",\"send-keys\",\"w7:p2\",\"Enter\"]\n",
+            herdr.display()
+        ));
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["kickoff", "run", "--target", "w7:p2", "--prompt", "Do it"])
+        .env("MAEH_FAKE_LOG", &herdr_log)
+        .env("MAEH_FAKE_WORKTREE", &worktree)
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "kickoff",
+            "run",
+            "--target",
+            "w7:p2",
+            "--pane-text",
+            "ready\n› ",
+            "--prompt",
+            "Do again",
+        ])
+        .env("MAEH_FAKE_LOG", &herdr_log)
+        .env("MAEH_FAKE_WORKTREE", &worktree)
+        .assert()
+        .success();
+    let prompt_file = temp.path().join("prompt.txt");
+    let pane_file = temp.path().join("pane.txt");
+    fs::write(&prompt_file, "Do file").unwrap();
+    fs::write(&pane_file, "ready\n› ").unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["kickoff", "plan", "--target", "w7:p2", "--prompt-file"])
+        .arg(&prompt_file)
+        .arg("--pane-file")
+        .arg(&pane_file)
+        .assert()
+        .success();
+    let log = fs::read_to_string(&herdr_log).unwrap();
+    assert!(log.contains("agent send w7:p2 Do it"));
+    assert!(log.contains("agent send w7:p2 Do again"));
+    assert!(log.contains("pane send-keys w7:p2 Enter"));
+
+    maeh()
+        .args([
+            "verify",
+            "prompt",
+            "--before",
+            "› Do it",
+            "--after",
+            "Working",
+            "--prompt",
+            "Do it",
+        ])
+        .assert()
+        .success()
+        .stdout("maeh verify prompt\n  changed: true\n  submitted: true\n  prompt head: Do it\n");
+    let before_file = temp.path().join("before.txt");
+    let after_file = temp.path().join("after.txt");
+    fs::write(&before_file, "› Do file").unwrap();
+    fs::write(&after_file, "Working file").unwrap();
+    maeh()
+        .args(["verify", "prompt", "--before-file"])
+        .arg(&before_file)
+        .arg("--after-file")
+        .arg(&after_file)
+        .arg("--prompt-file")
+        .arg(&prompt_file)
+        .assert()
+        .success();
+
+    let fail_herdr = temp.path().join("fail-herdr");
+    fs::write(&fail_herdr, "#!/bin/sh\nexit 7\n").unwrap();
+    make_executable(&fail_herdr);
+    fs::write(
+        home.join("config.toml"),
+        format!(
+            "backend = 'herdr'\nherdr_bin = '{}'\n",
+            fail_herdr.display()
+        ),
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "kickoff",
+            "run",
+            "--target",
+            "w7:p2",
+            "--pane-text",
+            "ready\n› ",
+            "--prompt",
+            "Do fail",
+        ])
+        .assert()
+        .failure()
+        .stderr(format!(
+            "maeh error: backend: backend command failed: {} exited 7\n",
+            fail_herdr.display()
+        ));
+}
+
+#[test]
+fn tmux_spawn_run_persists_real_panes_and_delivery_plans_enter() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("state");
+    init_home(&home);
+    let tmux = temp.path().join("fake-tmux");
+    fs::write(
+        &tmux,
+        "#!/bin/sh\nif [ \"$1\" = new-window ]; then printf '@7\\t%%1\\n'; exit 0; fi\nif [ \"$1\" = split-window ]; then printf '%%3\\n'; exit 0; fi\nprintf '{}\\n'\n",
+    )
+    .unwrap();
+    make_executable(&tmux);
+    fs::write(
+        home.join("config.toml"),
+        format!(
+            "backend = 'tmux'\ntmux_bin = '{}'\ntmux_session = 'sess'\ninclude_editor = false\n",
+            tmux.display()
+        ),
+    )
+    .unwrap();
+    let worktree = temp.path().join("wt");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "spawn", "run", "--slot", "t7", "--repo", "/repo", "--branch", "ha",
+            "--path",
+        ])
+        .arg(&worktree)
+        .args(["--label", "tmux-live", "--task-url", "https://task", "--no-editor"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh spawn run\n  requested backend: tmux\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: {0}\n  tmux session: sess\nworktree opened\n  slot: t7\n  workspace: @7\n  window: @7\n  path: {1}\n  primary pane: %1\n  critic pane: %3\n",
+            tmux.display(),
+            worktree.display()
+        ));
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "get", "t7", "critic_pane"])
+        .assert()
+        .success()
+        .stdout("%3\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["kickoff", "plan", "--target", "%1", "--pane-text", "ready\n> ", "--prompt", "Do it"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh kickoff plan\n  requested backend: tmux\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: {0}\n  tmux session: sess\nmutate\tsend-text\t%1\tsend 5 chars plus explicit Enter\n  argv: [\"{0}\",\"send-keys\",\"-t\",\"%1\",\"-l\",\"Do it\"]\nmutate\tsubmit-enter\t%1\tsend 5 chars plus explicit Enter\n  argv: [\"{0}\",\"send-keys\",\"-t\",\"%1\",\"Enter\"]\n",
+            tmux.display()
+        ));
+}
+
+#[test]
+fn kickoff_cli_handles_blockers_and_noops_without_pasting_task_prompt() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("state");
+    init_home(&home);
+    fs::write(home.join("config.toml"), "backend = 'herdr'\n").unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["kickoff", "plan", "--target", "p", "--pane-text", "Do you trust this folder?", "--prompt", "Do it"])
+        .assert()
+        .success()
+        .stdout("maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsend-text\tp\tanswer trust blocker with 1 plus explicit Enter\n  argv: [\"herdr\",\"agent\",\"send\",\"p\",\"1\"]\nmutate\tsubmit-enter\tp\tanswer trust blocker with 1 plus explicit Enter\n  argv: [\"herdr\",\"pane\",\"send-keys\",\"p\",\"Enter\"]\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["kickoff", "plan", "--target", "p", "--pane-text", "Update available. Install?", "--prompt", "Do it"])
+        .assert()
+        .success()
+        .stdout("maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsend-text\tp\tanswer update blocker with n plus explicit Enter\n  argv: [\"herdr\",\"agent\",\"send\",\"p\",\"n\"]\nmutate\tsubmit-enter\tp\tanswer update blocker with n plus explicit Enter\n  argv: [\"herdr\",\"pane\",\"send-keys\",\"p\",\"Enter\"]\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["kickoff", "plan", "--target", "p", "--pane-text", "Press Enter to continue", "--prompt", "Do it"])
+        .assert()
+        .success()
+        .stdout("maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsubmit-enter\tp\tanswer continue blocker with Enter plus explicit Enter\n  argv: [\"herdr\",\"pane\",\"send-keys\",\"p\",\"Enter\"]\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["kickoff", "plan", "--target", "p", "--pane-text", "working", "--prompt", "Do it"])
+        .assert()
+        .success()
+        .stdout("maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nread\tnoop\tp\tpane busy or unknown\n");
 }
 
 #[test]

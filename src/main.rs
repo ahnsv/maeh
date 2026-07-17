@@ -11,6 +11,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 
+use maeh::backend::{
+    adapter_for, delivery_plan, pane_text_from_read_output, print_operations, print_slots,
+    verify_prompt_execution, BackendEnv, BackendKind, BackendSettings, LayoutOptions, RealRunner,
+    ReconciliationService, SpawnRequest, WorktreeRequest,
+};
+
 #[derive(Debug, Error)]
 enum MaehError {
     #[error("io: {0}")]
@@ -25,6 +31,8 @@ enum MaehError {
     CacheMiss(String),
     #[error("capsule too large: {actual} chars > {max} chars")]
     CapsuleTooLarge { actual: usize, max: usize },
+    #[error("backend: {0}")]
+    Backend(#[from] maeh::backend::BackendError),
     #[error("usage: {0}")]
     Usage(String),
 }
@@ -33,8 +41,17 @@ type Result<T> = std::result::Result<T, MaehError>;
 type State = BTreeMap<String, BTreeMap<String, String>>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
 struct Config {
-    backend: String,
+    backend: BackendKind,
+    herdr_bin: String,
+    tmux_bin: String,
+    tmux_session: String,
+    include_editor: bool,
+    focus: bool,
+    primary_agent_cmd: String,
+    critic_agent_cmd: String,
+    editor_cmd: String,
     context_switch_cap: u64,
     review_cap: u64,
     board_ttl_intake_secs: u64,
@@ -48,7 +65,15 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            backend: "auto".to_string(),
+            backend: BackendKind::Auto,
+            herdr_bin: "herdr".to_string(),
+            tmux_bin: "tmux".to_string(),
+            tmux_session: "maeh".to_string(),
+            include_editor: true,
+            focus: false,
+            primary_agent_cmd: "codex".to_string(),
+            critic_agent_cmd: "codex".to_string(),
+            editor_cmd: "vi".to_string(),
             context_switch_cap: 3,
             review_cap: 5,
             board_ttl_intake_secs: 3_600,
@@ -99,6 +124,11 @@ fn dispatch(home: &Path, args: &mut Vec<String>) -> Result<()> {
         "board-cache" => board_cache_command(home, args),
         "capsule" => capsule_command(home, args),
         "prompt" => prompt_command(args),
+        "backend" => backend_command(home, args),
+        "worktree" => worktree_command(home, args),
+        "spawn" => spawn_command(home, args),
+        "kickoff" => kickoff_command(home, args),
+        "verify" => verify_command(args),
         "statusline" => statusline(home),
         "work-hours" => work_hours(home),
         "doctor" => doctor(home),
@@ -120,6 +150,11 @@ fn print_help() {
     println!("  board-cache   put or get tracker board snapshots");
     println!("  capsule       put, get, or prompt compact task context");
     println!("  prompt        render kickoff prompts");
+    println!("  backend       plan or dry-run backend discovery/reconciliation");
+    println!("  worktree      plan or open backend worktrees/workspaces");
+    println!("  spawn         plan or run worktree plus primary/critic agents");
+    println!("  kickoff       plan or deliver queued prompts to agent panes");
+    println!("  verify        verify prompt execution evidence");
     println!("  statusline    print compact pool status");
     println!("  work-hours    evaluate configured work-hour guard");
     println!("  doctor        debug paths, config, backend, and env");
@@ -222,18 +257,86 @@ fn config_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
 
 fn read_config(home: &Path) -> Result<Config> {
     let path = config_path(home);
-    if path.exists() {
-        Ok(toml::from_str(&fs::read_to_string(path)?)?)
+    let mut config = if path.exists() {
+        toml::from_str(&fs::read_to_string(path)?)?
     } else {
-        Ok(Config::default())
+        Config::default()
+    };
+    apply_config_env(&mut config);
+    Ok(config)
+}
+
+fn apply_config_env(config: &mut Config) {
+    if let Some(value) = non_empty_env("MAEH_INCLUDE_EDITOR") {
+        config.include_editor = parse_bool(&value, config.include_editor);
     }
+    if let Some(value) = non_empty_env("MAEH_FOCUS") {
+        config.focus = parse_bool(&value, config.focus);
+    }
+    if let Some(value) = non_empty_env("MAEH_PRIMARY_AGENT_CMD") {
+        config.primary_agent_cmd = value;
+    }
+    if let Some(value) = non_empty_env("MAEH_CRITIC_AGENT_CMD") {
+        config.critic_agent_cmd = value;
+    }
+    if let Some(value) = non_empty_env("MAEH_EDITOR_CMD") {
+        config.editor_cmd = value;
+    }
+}
+
+fn backend_settings_for_config(config: &Config) -> Result<BackendSettings> {
+    backend_settings_for_config_env(config, &BackendEnv::from_env()?)
+}
+
+fn backend_settings_for_config_env(config: &Config, env: &BackendEnv) -> Result<BackendSettings> {
+    Ok(BackendSettings::resolve(
+        config.backend,
+        &config.herdr_bin,
+        &config.tmux_bin,
+        &config.tmux_session,
+        env,
+    ))
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    match std::env::var(name) {
+        Ok(value) if !value.is_empty() => Some(value),
+        _ => None,
+    }
+}
+
+fn parse_bool(value: &str, fallback: bool) -> bool {
+    match value {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => fallback,
+    }
+}
+
+fn backend_settings(home: &Path) -> Result<BackendSettings> {
+    backend_settings_for_config(&read_config(home)?)
+}
+
+fn print_backend_resolution(settings: &BackendSettings) {
+    println!("  requested backend: {}", settings.requested);
+    println!("  selected backend: {}", settings.selected);
+    println!("  herdr bin: {}", settings.herdr_bin);
+    println!("  tmux bin: {}", settings.tmux_bin);
+    println!("  tmux session: {}", settings.tmux_session);
 }
 
 fn show_config(home: &Path) -> Result<()> {
     let config = read_config(home)?;
+    let settings = backend_settings_for_config(&config)?;
     println!("maeh config");
     println!("  home: {}", display(home));
     println!("  backend: {}", config.backend);
+    print_backend_resolution(&settings);
+    println!("  include editor: {}", config.include_editor);
+    println!("  focus: {}", config.focus);
+    println!("  primary agent cmd: {}", config.primary_agent_cmd);
+    println!("  critic agent cmd: {}", config.critic_agent_cmd);
+    println!("  editor cmd: {}", config.editor_cmd);
     println!("  context switch cap: {}", config.context_switch_cap);
     println!("  review cap: {}", config.review_cap);
     println!("  board ttl intake: {}s", config.board_ttl_intake_secs);
@@ -250,6 +353,14 @@ fn show_config(home: &Path) -> Result<()> {
 fn emit_config(home: &Path) -> Result<()> {
     let config = read_config(home)?;
     println!("MAEH_BACKEND={}", config.backend);
+    println!("MAEH_HERDR_BIN={}", config.herdr_bin);
+    println!("MAEH_TMUX_BIN={}", config.tmux_bin);
+    println!("MAEH_TMUX_SESSION={}", config.tmux_session);
+    println!("MAEH_INCLUDE_EDITOR={}", config.include_editor);
+    println!("MAEH_FOCUS={}", config.focus);
+    println!("MAEH_PRIMARY_AGENT_CMD={}", config.primary_agent_cmd);
+    println!("MAEH_CRITIC_AGENT_CMD={}", config.critic_agent_cmd);
+    println!("MAEH_EDITOR_CMD={}", config.editor_cmd);
     println!("MAEH_CONTEXT_SWITCH_CAP={}", config.context_switch_cap);
     println!("MAEH_REVIEW_CAP={}", config.review_cap);
     println!("MAEH_BOARD_TTL_INTAKE={}", config.board_ttl_intake_secs);
@@ -259,6 +370,322 @@ fn emit_config(home: &Path) -> Result<()> {
         config.task_capsule_max_chars
     );
     Ok(())
+}
+
+fn backend_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
+    let command = take_arg(args, "backend command")?;
+    let fixture = flag_value(args, "--fixture", "")?;
+    let exec = flag_present(args, "--exec");
+    if exec && !fixture.is_empty() {
+        return Err(MaehError::Usage(
+            "--fixture and --exec are mutually exclusive".to_string(),
+        ));
+    }
+    let settings = backend_settings(home)?;
+    let adapter = adapter_for(&settings);
+    let service = ReconciliationService::new(adapter.as_ref());
+    println!("maeh backend {command}");
+    print_backend_resolution(&settings);
+    match command.as_str() {
+        "plan" => print_operations(&service.discovery_plan()),
+        "discover" => {
+            if fixture.is_empty() && !exec {
+                print_operations(&service.discovery_plan());
+            } else {
+                let slots = backend_discover(home, adapter.as_ref(), &service, &fixture)?;
+                print_slots(&slots);
+            }
+        }
+        "reconcile" => {
+            if fixture.is_empty() && !exec {
+                print_operations(&service.discovery_plan());
+            } else {
+                let slots = backend_discover(home, adapter.as_ref(), &service, &fixture)?;
+                let operations = service.reconcile(&read_state(home)?, &slots);
+                print_operations(&operations);
+            }
+        }
+        other => return Err(MaehError::Usage(format!("unknown backend command {other}"))),
+    }
+    Ok(())
+}
+
+fn backend_discover(
+    home: &Path,
+    adapter: &dyn maeh::backend::BackendAdapter,
+    service: &ReconciliationService<'_>,
+    fixture: &str,
+) -> Result<Vec<maeh::backend::BackendSlot>> {
+    let state = read_state(home)?;
+    if !fixture.is_empty() {
+        let raw = fs::read_to_string(fixture)?;
+        return Ok(adapter.parse_discovery(&raw, &state, now_epoch())?);
+    }
+    let mut runner = RealRunner;
+    Ok(service.discover_with_runner(&mut runner, &state, now_epoch())?)
+}
+
+fn worktree_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
+    let command = take_arg(args, "worktree command")?;
+    if !matches!(command.as_str(), "plan" | "open") {
+        return Err(MaehError::Usage(format!(
+            "unknown worktree command {command}"
+        )));
+    }
+    let config = read_config(home)?;
+    let request = worktree_request(&config, args)?;
+    let settings = backend_settings_for_config(&config)?;
+    let adapter = adapter_for(&settings);
+    println!("maeh worktree {command}");
+    print_backend_resolution(&settings);
+    if command == "plan" {
+        print_operations(&adapter.worktree_plan(&request));
+    } else {
+        let mut runner = RealRunner;
+        let record = adapter.execute_worktree(&mut runner, &request)?;
+        persist_worktree(home, &record, "")?;
+        print_worktree_record(&record);
+    }
+    Ok(())
+}
+
+fn spawn_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
+    let command = take_arg(args, "spawn command")?;
+    if !matches!(command.as_str(), "plan" | "run") {
+        return Err(MaehError::Usage(format!("unknown spawn command {command}")));
+    }
+    let config = read_config(home)?;
+    let request = spawn_request(&config, args)?;
+    let settings = backend_settings_for_config(&config)?;
+    let adapter = adapter_for(&settings);
+    println!("maeh spawn {command}");
+    print_backend_resolution(&settings);
+    if command == "plan" {
+        print_operations(&adapter.spawn_plan(&request));
+    } else {
+        let mut runner = RealRunner;
+        let record = adapter.execute_spawn(&mut runner, &request)?;
+        persist_spawn(home, &record, &request.task_url)?;
+        print_spawn_record(&record);
+    }
+    Ok(())
+}
+
+fn kickoff_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
+    let command = take_arg(args, "kickoff command")?;
+    let target = required_flag(args, "--target")?;
+    let prompt = prompt_text(args)?;
+    let pane_text = pane_text(args)?;
+    let settings = backend_settings(home)?;
+    let adapter = adapter_for(&settings);
+    println!("maeh kickoff {command}");
+    print_backend_resolution(&settings);
+    match command.as_str() {
+        "plan" => print_operations(&delivery_plan(
+            adapter.as_ref(),
+            &target,
+            &pane_text,
+            &prompt,
+        )),
+        "run" => {
+            let mut runner = RealRunner;
+            let live_text = if pane_text.is_empty() {
+                let output = run_command(&mut runner, &adapter.pane_read_spec(&target))?;
+                pane_text_from_read_output(settings.selected, &output.stdout)?
+            } else {
+                pane_text
+            };
+            let operations = delivery_plan(adapter.as_ref(), &target, &live_text, &prompt);
+            print_operations(&operations);
+            for spec in operations
+                .into_iter()
+                .filter_map(|operation| operation.command)
+            {
+                let _ = run_command(&mut runner, &spec)?;
+            }
+        }
+        other => return Err(MaehError::Usage(format!("unknown kickoff command {other}"))),
+    }
+    Ok(())
+}
+
+fn verify_command(args: &mut Vec<String>) -> Result<()> {
+    match take_arg(args, "verify command")?.as_str() {
+        "prompt" => {
+            let before = read_text_flag(args, "--before", "--before-file")?;
+            let after = read_text_flag(args, "--after", "--after-file")?;
+            let prompt = read_text_flag(args, "--prompt", "--prompt-file")?;
+            let verification = verify_prompt_execution(&before, &after, &prompt)?;
+            println!("maeh verify prompt");
+            println!("  changed: {}", verification.changed);
+            println!("  submitted: {}", verification.submitted);
+            println!("  prompt head: {}", verification.prompt_head);
+            Ok(())
+        }
+        other => Err(MaehError::Usage(format!("unknown verify command {other}"))),
+    }
+}
+
+fn worktree_request(config: &Config, args: &mut Vec<String>) -> Result<WorktreeRequest> {
+    let slot = required_flag(args, "--slot")?;
+    let repo = PathBuf::from(required_flag(args, "--repo")?);
+    let branch = flag_value(args, "--branch", "")?;
+    let base = flag_value(args, "--base", "HEAD")?;
+    let path = PathBuf::from(required_flag(args, "--path")?);
+    let label = flag_value(args, "--label", &slot)?;
+    let create = flag_present(args, "--create");
+    let layout = layout_options(config, args);
+    Ok(WorktreeRequest {
+        slot,
+        repo,
+        branch,
+        base,
+        path,
+        label,
+        create,
+        layout,
+    })
+}
+
+fn spawn_request(config: &Config, args: &mut Vec<String>) -> Result<SpawnRequest> {
+    let task_url = required_flag(args, "--task-url")?;
+    let worktree = worktree_request(config, args)?;
+    let primary_arg = flag_value(args, "--primary-cmd", &config.primary_agent_cmd)?;
+    let primary_agent_cmd = command_words(&primary_arg);
+    let critic_agent_cmd =
+        command_words(&flag_value(args, "--critic-cmd", &config.critic_agent_cmd)?);
+    let editor_cmd = command_words(&flag_value(args, "--editor-cmd", &config.editor_cmd)?);
+    Ok(SpawnRequest {
+        worktree,
+        task_url,
+        primary_agent_cmd,
+        critic_agent_cmd,
+        editor_cmd,
+    })
+}
+
+fn layout_options(config: &Config, args: &mut Vec<String>) -> LayoutOptions {
+    let mut include_editor = config.include_editor;
+    if flag_present(args, "--no-editor") {
+        include_editor = false;
+    }
+    if flag_present(args, "--with-editor") {
+        include_editor = true;
+    }
+    let mut focus = config.focus;
+    if flag_present(args, "--focus") {
+        focus = true;
+    }
+    if flag_present(args, "--no-focus") {
+        focus = false;
+    }
+    LayoutOptions {
+        include_editor,
+        focus,
+    }
+}
+
+fn command_words(command: &str) -> Vec<String> {
+    command
+        .split_whitespace()
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn required_flag(args: &mut Vec<String>, flag: &str) -> Result<String> {
+    let value = flag_value(args, flag, "")?;
+    if value.is_empty() {
+        Err(MaehError::Usage(format!("{flag} needs a value")))
+    } else {
+        Ok(value)
+    }
+}
+
+fn prompt_text(args: &mut Vec<String>) -> Result<String> {
+    if args.iter().any(|arg| arg == "--prompt-file") {
+        return Ok(fs::read_to_string(flag_value(args, "--prompt-file", "")?)?);
+    }
+    flag_value(args, "--prompt", "")
+}
+
+fn pane_text(args: &mut Vec<String>) -> Result<String> {
+    if args.iter().any(|arg| arg == "--pane-file") {
+        return Ok(fs::read_to_string(flag_value(args, "--pane-file", "")?)?);
+    }
+    flag_value(args, "--pane-text", "")
+}
+
+fn read_text_flag(args: &mut Vec<String>, value_flag: &str, file_flag: &str) -> Result<String> {
+    if args.iter().any(|arg| arg == file_flag) {
+        return Ok(fs::read_to_string(flag_value(args, file_flag, "")?)?);
+    }
+    required_flag(args, value_flag)
+}
+
+fn run_command(
+    runner: &mut dyn maeh::backend::CommandRunner,
+    spec: &maeh::backend::CommandSpec,
+) -> Result<maeh::backend::CommandOutput> {
+    let output = runner.run(spec)?;
+    if output.status != 0 {
+        return Err(maeh::backend::BackendError::CommandFailed {
+            program: spec.program.clone(),
+            status: output.status,
+        }
+        .into());
+    }
+    Ok(output)
+}
+
+fn persist_worktree(
+    home: &Path,
+    record: &maeh::backend::WorktreeRecord,
+    task_url: &str,
+) -> Result<()> {
+    let mut state = read_state(home)?;
+    let entry = state.entry(record.slot.clone()).or_default();
+    entry.insert("backend".to_string(), record.backend.to_string());
+    entry.insert("workspace_id".to_string(), record.workspace_id.clone());
+    entry.insert("worktree".to_string(), record.worktree.clone());
+    if !record.window_id.is_empty() {
+        entry.insert("window_id".to_string(), record.window_id.clone());
+    }
+    if !task_url.is_empty() {
+        entry.insert("task_url".to_string(), task_url.to_string());
+    }
+    write_state(home, &state)
+}
+
+fn persist_spawn(home: &Path, record: &maeh::backend::SpawnRecord, task_url: &str) -> Result<()> {
+    persist_worktree(home, &record.worktree, task_url)?;
+    let mut state = read_state(home)?;
+    let entry = state.entry(record.worktree.slot.clone()).or_default();
+    entry.insert("primary_pane".to_string(), record.primary_pane.clone());
+    entry.insert("critic_pane".to_string(), record.critic_pane.clone());
+    if !record.editor_pane.is_empty() {
+        entry.insert("editor_pane".to_string(), record.editor_pane.clone());
+    }
+    entry.insert("status".to_string(), "active".to_string());
+    write_state(home, &state)
+}
+
+fn print_worktree_record(record: &maeh::backend::WorktreeRecord) {
+    println!("worktree opened");
+    println!("  slot: {}", record.slot);
+    println!("  workspace: {}", record.workspace_id);
+    if !record.window_id.is_empty() {
+        println!("  window: {}", record.window_id);
+    }
+    println!("  path: {}", record.worktree);
+}
+
+fn print_spawn_record(record: &maeh::backend::SpawnRecord) {
+    print_worktree_record(&record.worktree);
+    println!("  primary pane: {}", record.primary_pane);
+    println!("  critic pane: {}", record.critic_pane);
+    if !record.editor_pane.is_empty() {
+        println!("  editor pane: {}", record.editor_pane);
+    }
 }
 
 fn ledger_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
@@ -553,12 +980,14 @@ fn kickoff_prompt(url: &str, capsule_file: Option<&Path>) -> Result<()> {
 
 fn doctor(home: &Path) -> Result<()> {
     let config = read_config(home)?;
+    let backend_env = BackendEnv::from_env()?;
+    let settings = backend_settings_for_config_env(&config, &backend_env)?;
     let config_state = if config_path(home).exists() {
         "ok"
     } else {
         "missing"
     };
-    let herdr_state = if std::env::var_os("HERDR_ENV").is_some() {
+    let herdr_state = if backend_env.herdr_session {
         "detected"
     } else {
         "not-detected"
@@ -573,6 +1002,7 @@ fn doctor(home: &Path) -> Result<()> {
     println!("  config: {config_state}");
     println!("  ledger: {}", display(&ledger_dir(home)));
     println!("  backend: {}", config.backend);
+    println!("  selected backend: {}", settings.selected);
     println!("  herdr: {herdr_state}");
     println!("  maeh debug: {debug_state}");
     Ok(())

@@ -1,6 +1,6 @@
 # Bash helper parity
 
-`maeh` covers the deterministic helper layer used by the hmph/Herdr loops. It intentionally keeps live terminal/workspace mutation in the loop runner until those boundaries are migrated behind injectable command-runner tests.
+`maeh` covers the deterministic helper layer and the live backend orchestration paths used by hmph/Herdr loops. Live Herdr/tmux mutation goes through backend adapters and one injectable command-runner seam, so tests can assert command shape without requiring a live terminal session.
 
 | Bash helper behavior | `maeh` command |
 | --- | --- |
@@ -18,12 +18,27 @@
 | slot worktree lookup | `maeh state worktree <slot>` |
 | slot removal | `maeh state delete-slot <slot>` |
 | hmph statusline pools | `maeh statusline` |
+| backend selection (`auto|tmux|herdr`) | typed config plus `MAEH_BACKEND`, `MAEH_HERDR_BIN`, `MAEH_TMUX_BIN`, `MAEH_TMUX_SESSION` overrides |
+| backend discovery plan | `maeh backend plan` |
+| normalized tmux/Herdr discovery | `maeh backend discover --fixture <adapter-output>` or explicit `--exec` |
+| dry-run state reconciliation | `maeh backend reconcile --fixture <adapter-output>` or explicit `--exec` |
+| worktree/workspace plan | `maeh worktree plan --slot <slot> --repo <repo> --path <path> [--create] [--no-editor]` |
+| worktree/workspace open | `maeh worktree open --slot <slot> --repo <repo> --path <path> [--create]` |
+| spawn primary/critic agents | `maeh spawn plan|run --slot <slot> --task-url <url> --repo <repo> --path <path> [--no-editor]` |
+| queued prompt delivery | `maeh kickoff plan|run --target <pane> --prompt <text>` |
+| prompt execution verification | `maeh verify prompt --before <text> --after <text> --prompt <text>` |
 | board cache put/get/stale fallback | `maeh board-cache put|get --key <intake|revamp> [--stale]` |
 | task capsule put/get/prompt | `maeh capsule put|get|prompt <url> [--edited <timestamp>]` |
 | kickoff message rendering | `maeh prompt kickoff --url <task-url> [--capsule-file <path>]` |
 | work-hours guard | `maeh work-hours` |
 | operator diagnostics | `maeh doctor` |
 
+## Live backend boundary
+
+The Rust surface now covers backend resolution, discovery, reconciliation, worktree/workspace open, primary/critic spawn, prompt delivery, and prompt verification. Herdr uses `herdr worktree create|open`, `herdr agent start`, `herdr agent send`, and an explicit `herdr pane send-keys <pane> Enter` submit event. Tmux uses `git worktree add`, `tmux new-window`, `tmux split-window`, and explicit `tmux send-keys` text plus `Enter` events.
+
+Prompt delivery policy is backend-neutral: pane text plus queued prompt becomes exactly one intent — submit queued prompt, answer a safe Codex trust/update/continue blocker, or no-op for busy/unknown panes. Adapters only translate that intent to Herdr or tmux commands.
+
 ## Test policy
 
-The CLI contract is line-stable: integration tests assert stdout, stderr, and exit status for every command family and representative error path. CI fails if line or function coverage drops below 100%.
+The CLI contract is line-stable: integration tests assert stdout, stderr, and exit status for every command family and representative error path. Backend seam tests use a fake runner for tmux and Herdr argv/cwd/env assertions; CLI live-orchestration tests use deterministic fake `herdr`/`tmux` scripts and never require a live tmux or Herdr session. CI fails if line or function coverage drops below 100%.
