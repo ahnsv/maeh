@@ -46,6 +46,18 @@ The Rust surface now covers backend resolution, discovery, reconciliation, workt
 
 Prompt delivery policy is backend-neutral: pane text plus queued prompt becomes exactly one intent — submit queued prompt, answer a safe Codex trust/update/continue blocker, or no-op for busy/unknown panes. Adapters only translate that intent to Herdr or tmux commands.
 
+## LLM usage contract
+
+Agents should start with `maeh --help`, then use this table as the authoritative command map. The help surface follows the relevant [CLI Guidelines](https://clig.dev/) expectations: concise output when run without arguments, full `-h`/`--help`, example invocations, option descriptions, stdout for command output, and stderr for errors/diagnostics. Prefer `plan`, `list`, `inspect`, `verify`, and `status` commands when gathering context; backend mutations are intentionally visible through `--exec` flags or verbs like `open`, `run`, and `close`.
+
+Stable surfaces for LLM automation:
+
+- `maeh backend list-task-slots` returns one row per slot with `slot task_url status snooze_until age_secs label primary_pane critic_pane worktree`.
+- `maeh backend list-worktrees` and `maeh state list` are the compact inventory surfaces for workspace state.
+- `maeh capsule prompt <url>` and `maeh prompt kickoff --url <task-url>` are the preferred ways to build worker prompts without expanding full tracker context.
+- `maeh verify prompt` and `maeh slot verify <slot>` are the verification surfaces to check that a prompt or slot actually executed.
+- `maeh doctor` and `maeh selftest` are safe diagnostics for paths, config, backend selection, and state readability.
+
 ## Test policy
 
 The CLI contract is line-stable: integration tests assert stdout, stderr, and exit status for every command family and representative error path. Backend seam tests use a fake runner for tmux and Herdr argv/cwd/env assertions; CLI live-orchestration tests use deterministic fake `herdr`/`tmux` scripts and never require a live tmux or Herdr session. CI fails if line or function coverage drops below 100%.

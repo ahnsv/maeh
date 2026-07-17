@@ -1,0 +1,37 @@
+# maeh
+
+`maeh` is a Rust CLI for hmph/Herdr agent orchestration. It provides typed, line-stable commands for local state, backend discovery, task capsules, prompt delivery, worktree/workspace lifecycle, and diagnostics.
+
+## Start here
+
+- Command index: `maeh --help`
+- Install docs: `docs/installation.md`
+- Bash-helper command map: `docs/bash-helper-parity.md`
+- Implementation boundaries: `docs/implementation-plan.md` and `docs/orchestration-boundary-plan.md`
+
+## Agent-safe command rules
+
+- Follow the CLI Guidelines contract used by this repo: no-argument output is concise, `-h`/`--help` is complete, examples are in help text, command output goes to stdout, and errors/diagnostics go to stderr.
+- Prefer read-only context commands first: `plan`, `list`, `inspect`, `verify`, `status`, `doctor`, `selftest`.
+- Treat commands with `--exec`, `open`, `run`, `close`, or `worktree-remove` as mutating backend actions.
+- Outputs are stable plain text and intentionally asserted in tests; parse exact rows instead of scraping prose.
+- Use `MAEH_HOME` or `--home PATH` to isolate local state in tests or agent sandboxes.
+
+## Key surfaces
+
+- `maeh backend list-task-slots` prints `slot task_url status snooze_until age_secs label primary_pane critic_pane worktree`.
+- `maeh backend list-worktrees` lists backend worktrees/workspaces.
+- `maeh state list` lists local managed slot tags.
+- `maeh capsule prompt <url>` emits compact task context for a tracker URL.
+- `maeh prompt kickoff --url <task-url>` renders a worker kickoff prompt.
+- `maeh verify prompt` and `maeh slot verify <slot>` check execution evidence.
+- `maeh doctor` explains resolved paths, config, backend, and environment.
+
+## Development checks
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo llvm-cov --all-targets --all-features --fail-under-lines 100 --fail-under-functions 100
+```
