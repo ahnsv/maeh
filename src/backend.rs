@@ -56,6 +56,7 @@ pub struct BackendEnv {
     pub herdr_session: bool,
     pub herdr_bin: Option<String>,
     pub tmux_bin: Option<String>,
+    pub tmux_session: Option<String>,
 }
 
 impl BackendEnv {
@@ -70,6 +71,7 @@ impl BackendEnv {
                 || std::env::var_os("HERDR_SOCKET_PATH").is_some(),
             herdr_bin: non_empty_env("MAEH_HERDR_BIN"),
             tmux_bin: non_empty_env("MAEH_TMUX_BIN"),
+            tmux_session: non_empty_env("MAEH_TMUX_SESSION"),
         })
     }
 }
@@ -80,6 +82,7 @@ pub struct BackendSettings {
     pub selected: BackendKind,
     pub herdr_bin: String,
     pub tmux_bin: String,
+    pub tmux_session: String,
 }
 
 impl BackendSettings {
@@ -87,6 +90,7 @@ impl BackendSettings {
         config_backend: BackendKind,
         config_herdr_bin: &str,
         config_tmux_bin: &str,
+        config_tmux_session: &str,
         env: &BackendEnv,
     ) -> Self {
         let requested = env.backend_override.unwrap_or(config_backend);
@@ -98,11 +102,16 @@ impl BackendSettings {
             Some(bin) => bin.clone(),
             None => config_tmux_bin.to_string(),
         };
+        let tmux_session = match &env.tmux_session {
+            Some(session) => session.clone(),
+            None => config_tmux_session.to_string(),
+        };
         Self {
             requested,
             selected: requested.resolve(env),
             herdr_bin,
             tmux_bin,
+            tmux_session,
         }
     }
 }
@@ -120,6 +129,15 @@ impl CommandSpec {
         Self {
             program: program.to_string(),
             args: args.iter().map(|arg| (*arg).to_string()).collect(),
+            cwd: None,
+            env: BTreeMap::new(),
+        }
+    }
+
+    pub fn from_args(program: &str, args: Vec<String>) -> Self {
+        Self {
+            program: program.to_string(),
+            args,
             cwd: None,
             env: BTreeMap::new(),
         }
@@ -223,6 +241,74 @@ impl OperationPlan {
             command: None,
         }
     }
+
+    pub fn mutate_command(
+        action: &str,
+        target: &str,
+        detail: String,
+        command: CommandSpec,
+    ) -> Self {
+        Self {
+            kind: OperationKind::Mutate,
+            action: action.to_string(),
+            target: target.to_string(),
+            detail,
+            command: Some(command),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LayoutOptions {
+    pub include_editor: bool,
+    pub focus: bool,
+}
+
+impl Default for LayoutOptions {
+    fn default() -> Self {
+        Self {
+            include_editor: true,
+            focus: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorktreeRequest {
+    pub slot: String,
+    pub repo: PathBuf,
+    pub branch: String,
+    pub base: String,
+    pub path: PathBuf,
+    pub label: String,
+    pub create: bool,
+    pub layout: LayoutOptions,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpawnRequest {
+    pub worktree: WorktreeRequest,
+    pub task_url: String,
+    pub primary_agent_cmd: Vec<String>,
+    pub critic_agent_cmd: Vec<String>,
+    pub editor_cmd: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorktreeRecord {
+    pub backend: BackendKind,
+    pub slot: String,
+    pub workspace_id: String,
+    pub window_id: String,
+    pub worktree: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpawnRecord {
+    pub worktree: WorktreeRecord,
+    pub primary_pane: String,
+    pub critic_pane: String,
+    pub editor_pane: String,
 }
 
 pub trait BackendAdapter {
@@ -234,15 +320,100 @@ pub trait BackendAdapter {
         expected_state: &SlotState,
         now_epoch: u64,
     ) -> Result<Vec<BackendSlot>, BackendError>;
+    fn worktree_plan(&self, request: &WorktreeRequest) -> Vec<OperationPlan>;
+    fn spawn_plan(&self, request: &SpawnRequest) -> Vec<OperationPlan>;
+    fn execute_worktree(
+        &self,
+        runner: &mut dyn CommandRunner,
+        request: &WorktreeRequest,
+    ) -> Result<WorktreeRecord, BackendError>;
+    fn execute_spawn(
+        &self,
+        runner: &mut dyn CommandRunner,
+        request: &SpawnRequest,
+    ) -> Result<SpawnRecord, BackendError>;
+    fn pane_read_spec(&self, target: &str) -> CommandSpec;
+    fn delivery_specs(&self, target: &str, intent: &DeliveryIntent) -> Vec<CommandSpec>;
+    fn close_spec(&self, target: &str) -> CommandSpec;
 }
 
 pub struct TmuxBackend {
     bin: String,
+    session: String,
 }
 
 impl TmuxBackend {
-    pub fn new(bin: String) -> Self {
-        Self { bin }
+    pub fn new(bin: String, session: String) -> Self {
+        Self { bin, session }
+    }
+
+    fn new_window_spec(&self, request: &WorktreeRequest, command: Option<String>) -> CommandSpec {
+        let mut args = vec!["new-window".to_string()];
+        if !request.layout.focus {
+            args.push("-d".to_string());
+        }
+        args.extend([
+            "-P".to_string(),
+            "-F".to_string(),
+            "#{window_id}\t#{pane_id}".to_string(),
+        ]);
+        if !self.session.is_empty() {
+            args.extend(["-t".to_string(), self.session.clone()]);
+        }
+        args.extend([
+            "-n".to_string(),
+            request.label.clone(),
+            "-c".to_string(),
+            display_path(&request.path),
+        ]);
+        if let Some(command) = command {
+            args.push(command);
+        }
+        CommandSpec::from_args(&self.bin, args)
+    }
+
+    fn split_spec(
+        &self,
+        target: &str,
+        path: &str,
+        direction: &str,
+        command: String,
+    ) -> CommandSpec {
+        CommandSpec::from_args(
+            &self.bin,
+            vec![
+                "split-window".to_string(),
+                "-d".to_string(),
+                "-P".to_string(),
+                "-F".to_string(),
+                "#{pane_id}".to_string(),
+                "-t".to_string(),
+                target.to_string(),
+                "-c".to_string(),
+                path.to_string(),
+                direction.to_string(),
+                command,
+            ],
+        )
+    }
+
+    fn git_worktree_spec(&self, request: &WorktreeRequest) -> CommandSpec {
+        let mut spec = CommandSpec::from_args(
+            "git",
+            vec![
+                "-C".to_string(),
+                display_path(&request.repo),
+                "worktree".to_string(),
+                "add".to_string(),
+                "-b".to_string(),
+                request.branch.clone(),
+                display_path(&request.path),
+            ],
+        );
+        if !request.base.is_empty() {
+            spec.args.push(request.base.clone());
+        }
+        spec
     }
 }
 
@@ -252,15 +423,19 @@ impl BackendAdapter for TmuxBackend {
     }
 
     fn discovery_spec(&self) -> CommandSpec {
-        CommandSpec::new(
-            &self.bin,
-            &[
-                "list-windows",
-                "-a",
-                "-F",
-                "#{session_name}:#{window_index}\u{1f}#{window_activity}\u{1f}#{window_name}\u{1f}#{@hmph_task}\u{1f}#{@hmph_status}\u{1f}#{@hmph_snooze_until}\u{1f}#{pane_current_path}",
-            ],
-        )
+        let sep = "\u{1f}";
+        let mut args = vec![
+            "list-windows".to_string(),
+            "-a".to_string(),
+            "-F".to_string(),
+            format!(
+                "#{{session_name}}:#{{window_index}}{sep}#{{window_activity}}{sep}#{{window_name}}{sep}#{{@hmph_task}}{sep}#{{@hmph_status}}{sep}#{{@hmph_snooze_until}}{sep}#{{pane_current_path}}"
+            ),
+        ];
+        if !self.session.is_empty() {
+            args.splice(1..1, ["-t".to_string(), self.session.clone()]);
+        }
+        CommandSpec::from_args(&self.bin, args)
     }
 
     fn parse_discovery(
@@ -292,11 +467,194 @@ impl BackendAdapter for TmuxBackend {
                 age_secs: now_epoch.saturating_sub(activity),
                 name: fields[2].to_string(),
                 worktree: fields[6].to_string(),
-                primary_pane: format!("{}.1", fields[0]),
-                critic_pane: format!("{}.2", fields[0]),
+                primary_pane: String::new(),
+                critic_pane: String::new(),
             });
         }
         Ok(slots)
+    }
+
+    fn worktree_plan(&self, request: &WorktreeRequest) -> Vec<OperationPlan> {
+        let mut operations = Vec::new();
+        if request.create {
+            operations.push(OperationPlan::mutate_command(
+                "worktree-create",
+                &request.slot,
+                format!("create git worktree {}", display_path(&request.path)),
+                self.git_worktree_spec(request),
+            ));
+        }
+        operations.push(OperationPlan::mutate_command(
+            "workspace-open",
+            &request.slot,
+            format!("open tmux window at {}", display_path(&request.path)),
+            self.new_window_spec(request, None),
+        ));
+        operations
+    }
+
+    fn spawn_plan(&self, request: &SpawnRequest) -> Vec<OperationPlan> {
+        let mut operations = Vec::new();
+        if request.worktree.create {
+            operations.push(OperationPlan::mutate_command(
+                "worktree-create",
+                &request.worktree.slot,
+                format!(
+                    "create git worktree {}",
+                    display_path(&request.worktree.path)
+                ),
+                self.git_worktree_spec(&request.worktree),
+            ));
+        }
+        let target = "$window";
+        let path = display_path(&request.worktree.path);
+        operations.push(OperationPlan::mutate_command(
+            "primary-agent",
+            &request.worktree.slot,
+            "open tmux window and start primary agent".to_string(),
+            self.new_window_spec(
+                &request.worktree,
+                Some(shell_command(&request.primary_agent_cmd)),
+            ),
+        ));
+        if request.worktree.layout.include_editor && !request.editor_cmd.is_empty() {
+            operations.push(OperationPlan::mutate_command(
+                "editor-pane",
+                &request.worktree.slot,
+                "start editor pane".to_string(),
+                self.split_spec(target, &path, "-h", shell_command(&request.editor_cmd)),
+            ));
+        }
+        operations.push(OperationPlan::mutate_command(
+            "critic-agent",
+            &request.worktree.slot,
+            "start critic agent".to_string(),
+            self.split_spec(
+                target,
+                &path,
+                "-v",
+                shell_command(&request.critic_agent_cmd),
+            ),
+        ));
+        operations
+    }
+
+    fn execute_worktree(
+        &self,
+        runner: &mut dyn CommandRunner,
+        request: &WorktreeRequest,
+    ) -> Result<WorktreeRecord, BackendError> {
+        if request.create {
+            run_ok(runner, &self.git_worktree_spec(request))?;
+        }
+        let output = run_ok(runner, &self.new_window_spec(request, None))?;
+        let (window_id, _) = parse_tmux_window_pane(&output.stdout)?;
+        Ok(WorktreeRecord {
+            backend: BackendKind::Tmux,
+            slot: request.slot.clone(),
+            workspace_id: window_id.clone(),
+            window_id,
+            worktree: display_path(&request.path),
+        })
+    }
+
+    fn execute_spawn(
+        &self,
+        runner: &mut dyn CommandRunner,
+        request: &SpawnRequest,
+    ) -> Result<SpawnRecord, BackendError> {
+        if request.worktree.create {
+            run_ok(runner, &self.git_worktree_spec(&request.worktree))?;
+        }
+        let primary_command = shell_command(&request.primary_agent_cmd);
+        let window_spec = self.new_window_spec(&request.worktree, Some(primary_command));
+        let output = run_ok(runner, &window_spec)?;
+        let (window_id, primary_pane) = parse_tmux_window_pane(&output.stdout)?;
+        let path = display_path(&request.worktree.path);
+        let editor_pane =
+            if request.worktree.layout.include_editor && !request.editor_cmd.is_empty() {
+                let editor_spec =
+                    self.split_spec(&window_id, &path, "-h", shell_command(&request.editor_cmd));
+                run_ok(runner, &editor_spec)?.stdout.trim().to_string()
+            } else {
+                String::new()
+            };
+        let critic_spec = self.split_spec(
+            &window_id,
+            &path,
+            "-v",
+            shell_command(&request.critic_agent_cmd),
+        );
+        let critic_pane = run_ok(runner, &critic_spec)?.stdout.trim().to_string();
+        Ok(SpawnRecord {
+            worktree: WorktreeRecord {
+                backend: BackendKind::Tmux,
+                slot: request.worktree.slot.clone(),
+                workspace_id: window_id.clone(),
+                window_id,
+                worktree: path,
+            },
+            primary_pane,
+            critic_pane,
+            editor_pane,
+        })
+    }
+
+    fn pane_read_spec(&self, target: &str) -> CommandSpec {
+        CommandSpec::from_args(
+            &self.bin,
+            vec![
+                "capture-pane".to_string(),
+                "-p".to_string(),
+                "-t".to_string(),
+                target.to_string(),
+                "-S".to_string(),
+                "-80".to_string(),
+            ],
+        )
+    }
+
+    fn delivery_specs(&self, target: &str, intent: &DeliveryIntent) -> Vec<CommandSpec> {
+        match intent {
+            DeliveryIntent::Noop { .. } => Vec::new(),
+            DeliveryIntent::SubmitQueued { text }
+            | DeliveryIntent::AnswerBlocker { response: text, .. } => {
+                let mut specs = Vec::new();
+                if !text.is_empty() {
+                    specs.push(CommandSpec::from_args(
+                        &self.bin,
+                        vec![
+                            "send-keys".to_string(),
+                            "-t".to_string(),
+                            target.to_string(),
+                            "-l".to_string(),
+                            text.clone(),
+                        ],
+                    ));
+                }
+                specs.push(CommandSpec::from_args(
+                    &self.bin,
+                    vec![
+                        "send-keys".to_string(),
+                        "-t".to_string(),
+                        target.to_string(),
+                        "Enter".to_string(),
+                    ],
+                ));
+                specs
+            }
+        }
+    }
+
+    fn close_spec(&self, target: &str) -> CommandSpec {
+        CommandSpec::from_args(
+            &self.bin,
+            vec![
+                "kill-window".to_string(),
+                "-t".to_string(),
+                target.to_string(),
+            ],
+        )
     }
 }
 
@@ -307,6 +665,61 @@ pub struct HerdrBackend {
 impl HerdrBackend {
     pub fn new(bin: String) -> Self {
         Self { bin }
+    }
+
+    fn worktree_spec(&self, request: &WorktreeRequest) -> CommandSpec {
+        let mut args = vec![
+            "worktree".to_string(),
+            if request.create { "create" } else { "open" }.to_string(),
+            "--cwd".to_string(),
+            display_path(&request.repo),
+        ];
+        if request.create {
+            args.extend(["--branch".to_string(), request.branch.clone()]);
+            if !request.base.is_empty() {
+                args.extend(["--base".to_string(), request.base.clone()]);
+            }
+        }
+        if !request.path.as_os_str().is_empty() {
+            args.extend(["--path".to_string(), display_path(&request.path)]);
+        } else if !request.branch.is_empty() {
+            args.extend(["--branch".to_string(), request.branch.clone()]);
+        }
+        if !request.label.is_empty() {
+            args.extend(["--label".to_string(), request.label.clone()]);
+        }
+        if request.layout.focus {
+            args.push("--focus".to_string());
+        } else {
+            args.push("--no-focus".to_string());
+        }
+        args.push("--json".to_string());
+        CommandSpec::from_args(&self.bin, args)
+    }
+
+    fn agent_start_spec(
+        &self,
+        name: &str,
+        path: &str,
+        workspace: &str,
+        split: &str,
+        command: &[String],
+    ) -> CommandSpec {
+        let mut args = vec![
+            "agent".to_string(),
+            "start".to_string(),
+            name.to_string(),
+            "--cwd".to_string(),
+            path.to_string(),
+            "--workspace".to_string(),
+            workspace.to_string(),
+            "--split".to_string(),
+            split.to_string(),
+            "--no-focus".to_string(),
+            "--".to_string(),
+        ];
+        args.extend(command.iter().cloned());
+        CommandSpec::from_args(&self.bin, args)
     }
 }
 
@@ -394,6 +807,190 @@ impl BackendAdapter for HerdrBackend {
             });
         }
         Ok(slots)
+    }
+
+    fn worktree_plan(&self, request: &WorktreeRequest) -> Vec<OperationPlan> {
+        vec![OperationPlan::mutate_command(
+            if request.create {
+                "worktree-create"
+            } else {
+                "worktree-open"
+            },
+            &request.slot,
+            format!(
+                "{} Herdr worktree/workspace",
+                if request.create { "create" } else { "open" }
+            ),
+            self.worktree_spec(request),
+        )]
+    }
+
+    fn spawn_plan(&self, request: &SpawnRequest) -> Vec<OperationPlan> {
+        let mut operations = self.worktree_plan(&request.worktree);
+        let path = if request.worktree.path.as_os_str().is_empty() {
+            "$worktree".to_string()
+        } else {
+            display_path(&request.worktree.path)
+        };
+        let workspace = "$workspace";
+        if request.worktree.layout.include_editor && !request.editor_cmd.is_empty() {
+            operations.push(OperationPlan::mutate_command(
+                "editor-pane",
+                &request.worktree.slot,
+                "start editor pane".to_string(),
+                self.agent_start_spec("editor", &path, workspace, "right", &request.editor_cmd),
+            ));
+        }
+        operations.push(OperationPlan::mutate_command(
+            "primary-agent",
+            &request.worktree.slot,
+            "start primary agent".to_string(),
+            self.agent_start_spec(
+                "primary",
+                &path,
+                workspace,
+                "right",
+                &request.primary_agent_cmd,
+            ),
+        ));
+        operations.push(OperationPlan::mutate_command(
+            "critic-agent",
+            &request.worktree.slot,
+            "start critic agent".to_string(),
+            self.agent_start_spec(
+                "critic",
+                &path,
+                workspace,
+                "down",
+                &request.critic_agent_cmd,
+            ),
+        ));
+        operations
+    }
+
+    fn execute_worktree(
+        &self,
+        runner: &mut dyn CommandRunner,
+        request: &WorktreeRequest,
+    ) -> Result<WorktreeRecord, BackendError> {
+        let output = run_ok(runner, &self.worktree_spec(request))?;
+        let payload: Value = serde_json::from_str(&output.stdout)?;
+        let workspace_id = find_string_key(&payload, &["workspace_id", "open_workspace_id"])
+            .ok_or_else(|| {
+                BackendError::Parse("herdr worktree output missing workspace id".to_string())
+            })?;
+        let worktree = find_string_key(&payload, &["path", "checkout_path"])
+            .unwrap_or_else(|| display_path(&request.path));
+        Ok(WorktreeRecord {
+            backend: BackendKind::Herdr,
+            slot: request.slot.clone(),
+            workspace_id,
+            window_id: String::new(),
+            worktree,
+        })
+    }
+
+    fn execute_spawn(
+        &self,
+        runner: &mut dyn CommandRunner,
+        request: &SpawnRequest,
+    ) -> Result<SpawnRecord, BackendError> {
+        let worktree = self.execute_worktree(runner, &request.worktree)?;
+        let editor_pane =
+            if request.worktree.layout.include_editor && !request.editor_cmd.is_empty() {
+                let editor_spec = self.agent_start_spec(
+                    "editor",
+                    &worktree.worktree,
+                    &worktree.workspace_id,
+                    "right",
+                    &request.editor_cmd,
+                );
+                let output = run_ok(runner, &editor_spec)?;
+                parse_pane_id(&output.stdout).unwrap_or_default()
+            } else {
+                String::new()
+            };
+        let primary_spec = self.agent_start_spec(
+            "primary",
+            &worktree.worktree,
+            &worktree.workspace_id,
+            "right",
+            &request.primary_agent_cmd,
+        );
+        let primary_output = run_ok(runner, &primary_spec)?;
+        let critic_spec = self.agent_start_spec(
+            "critic",
+            &worktree.worktree,
+            &worktree.workspace_id,
+            "down",
+            &request.critic_agent_cmd,
+        );
+        let critic_output = run_ok(runner, &critic_spec)?;
+        Ok(SpawnRecord {
+            worktree,
+            primary_pane: parse_pane_id(&primary_output.stdout).unwrap_or_default(),
+            critic_pane: parse_pane_id(&critic_output.stdout).unwrap_or_default(),
+            editor_pane,
+        })
+    }
+
+    fn pane_read_spec(&self, target: &str) -> CommandSpec {
+        CommandSpec::from_args(
+            &self.bin,
+            vec![
+                "agent".to_string(),
+                "read".to_string(),
+                target.to_string(),
+                "--source".to_string(),
+                "recent-unwrapped".to_string(),
+                "--lines".to_string(),
+                "80".to_string(),
+                "--format".to_string(),
+                "text".to_string(),
+            ],
+        )
+    }
+
+    fn delivery_specs(&self, target: &str, intent: &DeliveryIntent) -> Vec<CommandSpec> {
+        match intent {
+            DeliveryIntent::Noop { .. } => Vec::new(),
+            DeliveryIntent::SubmitQueued { text }
+            | DeliveryIntent::AnswerBlocker { response: text, .. } => {
+                let mut specs = Vec::new();
+                if !text.is_empty() {
+                    specs.push(CommandSpec::from_args(
+                        &self.bin,
+                        vec![
+                            "agent".to_string(),
+                            "send".to_string(),
+                            target.to_string(),
+                            text.clone(),
+                        ],
+                    ));
+                }
+                specs.push(CommandSpec::from_args(
+                    &self.bin,
+                    vec![
+                        "pane".to_string(),
+                        "send-keys".to_string(),
+                        target.to_string(),
+                        "Enter".to_string(),
+                    ],
+                ));
+                specs
+            }
+        }
+    }
+
+    fn close_spec(&self, target: &str) -> CommandSpec {
+        CommandSpec::from_args(
+            &self.bin,
+            vec![
+                "workspace".to_string(),
+                "close".to_string(),
+                target.to_string(),
+            ],
+        )
     }
 }
 
@@ -506,7 +1103,10 @@ pub fn adapter_for(settings: &BackendSettings) -> Box<dyn BackendAdapter> {
     match settings.selected {
         BackendKind::Auto => unreachable!("selected backend is resolved"),
         BackendKind::Herdr => Box::new(HerdrBackend::new(settings.herdr_bin.clone())),
-        BackendKind::Tmux => Box::new(TmuxBackend::new(settings.tmux_bin.clone())),
+        BackendKind::Tmux => Box::new(TmuxBackend::new(
+            settings.tmux_bin.clone(),
+            settings.tmux_session.clone(),
+        )),
     }
 }
 
@@ -548,6 +1148,165 @@ pub fn print_operations(operations: &[OperationPlan]) {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HarnessBlocker {
+    Trust,
+    Update,
+    Continue,
+}
+
+impl fmt::Display for HarnessBlocker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Trust => "trust",
+            Self::Update => "update",
+            Self::Continue => "continue",
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeliveryIntent {
+    SubmitQueued {
+        text: String,
+    },
+    AnswerBlocker {
+        blocker: HarnessBlocker,
+        response: String,
+    },
+    Noop {
+        reason: String,
+    },
+}
+
+impl DeliveryIntent {
+    pub fn action(&self) -> String {
+        match self {
+            Self::SubmitQueued { .. } => "submit-queued".to_string(),
+            Self::AnswerBlocker { blocker, .. } => format!("unblock-{blocker}"),
+            Self::Noop { .. } => "noop".to_string(),
+        }
+    }
+
+    pub fn detail(&self) -> String {
+        match self {
+            Self::SubmitQueued { text } => {
+                format!("send {} chars plus explicit Enter", text.chars().count())
+            }
+            Self::AnswerBlocker { blocker, response } => format!(
+                "answer {blocker} blocker with {} plus explicit Enter",
+                if response.is_empty() {
+                    "Enter"
+                } else {
+                    response
+                }
+            ),
+            Self::Noop { reason } => reason.clone(),
+        }
+    }
+}
+
+pub fn delivery_intent(pane_text: &str, queued_prompt: &str) -> DeliveryIntent {
+    if let Some((blocker, response)) = detect_blocker(pane_text) {
+        return DeliveryIntent::AnswerBlocker { blocker, response };
+    }
+    if queued_prompt.trim().is_empty() {
+        return DeliveryIntent::Noop {
+            reason: "no queued prompt".to_string(),
+        };
+    }
+    if pane_has_input_prompt(pane_text) {
+        return DeliveryIntent::SubmitQueued {
+            text: queued_prompt.to_string(),
+        };
+    }
+    DeliveryIntent::Noop {
+        reason: "pane busy or unknown".to_string(),
+    }
+}
+
+pub fn delivery_plan(
+    adapter: &dyn BackendAdapter,
+    target: &str,
+    pane_text: &str,
+    queued_prompt: &str,
+) -> Vec<OperationPlan> {
+    let intent = delivery_intent(pane_text, queued_prompt);
+    let mut operations = Vec::new();
+    let has_text_event = match &intent {
+        DeliveryIntent::SubmitQueued { text } => !text.is_empty(),
+        DeliveryIntent::AnswerBlocker { response, .. } => !response.is_empty(),
+        DeliveryIntent::Noop { .. } => false,
+    };
+    let specs = adapter.delivery_specs(target, &intent);
+    if specs.is_empty() {
+        operations.push(OperationPlan::read(
+            &intent.action(),
+            target,
+            intent.detail(),
+            None,
+        ));
+    } else {
+        for (index, spec) in specs.into_iter().enumerate() {
+            let action = if index == 0 && has_text_event {
+                "send-text"
+            } else {
+                "submit-enter"
+            };
+            operations.push(OperationPlan::mutate_command(
+                action,
+                target,
+                intent.detail(),
+                spec,
+            ));
+        }
+    }
+    operations
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromptVerification {
+    pub changed: bool,
+    pub submitted: bool,
+    pub prompt_head: String,
+}
+
+pub fn pane_text_from_read_output(kind: BackendKind, stdout: &str) -> Result<String, BackendError> {
+    match kind {
+        BackendKind::Herdr => {
+            let payload: Value = serde_json::from_str(stdout)?;
+            find_string_key(&payload, &["text"]).ok_or_else(|| {
+                BackendError::Parse("herdr pane read output missing text".to_string())
+            })
+        }
+        BackendKind::Tmux | BackendKind::Auto => Ok(stdout.to_string()),
+    }
+}
+
+pub fn verify_prompt_execution(
+    before: &str,
+    after: &str,
+    prompt: &str,
+) -> Result<PromptVerification, BackendError> {
+    let changed = before != after;
+    let prompt_head = first_prompt_line(prompt);
+    let last_line = after
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("");
+    let still_pending = !prompt_head.is_empty() && last_line.contains(&prompt_head);
+    let submitted = changed && !still_pending;
+    if !submitted {
+        return Err(BackendError::Verify("prompt did not execute".to_string()));
+    }
+    Ok(PromptVerification {
+        changed,
+        submitted,
+        prompt_head,
+    })
+}
+
 #[derive(Debug, Error)]
 pub enum BackendError {
     #[error("io: {0}")]
@@ -560,6 +1319,22 @@ pub enum BackendError {
     CommandFailed { program: String, status: i32 },
     #[error("backend parse: {0}")]
     Parse(String),
+    #[error("verify: {0}")]
+    Verify(String),
+}
+
+fn run_ok(
+    runner: &mut dyn CommandRunner,
+    spec: &CommandSpec,
+) -> Result<CommandOutput, BackendError> {
+    let output = runner.run(spec)?;
+    if output.status != 0 {
+        return Err(BackendError::CommandFailed {
+            program: spec.program.clone(),
+            status: output.status,
+        });
+    }
+    Ok(output)
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -635,4 +1410,91 @@ fn first_agent_pane(panes: &[&Value], name: &str) -> String {
         }
     }
     String::new()
+}
+
+fn display_path(path: &std::path::Path) -> String {
+    path.display().to_string()
+}
+
+fn shell_command(argv: &[String]) -> String {
+    argv.join(" ")
+}
+
+fn parse_tmux_window_pane(stdout: &str) -> Result<(String, String), BackendError> {
+    let line = stdout.trim();
+    let fields = line.split('\t').collect::<Vec<_>>();
+    if fields.len() == 2 {
+        return Ok((fields[0].to_string(), fields[1].to_string()));
+    }
+    Err(BackendError::Parse(
+        "tmux window output missing window/pane ids".to_string(),
+    ))
+}
+
+fn parse_pane_id(stdout: &str) -> Option<String> {
+    let payload = serde_json::from_str::<Value>(stdout).ok()?;
+    find_string_key(&payload, &["pane_id", "id", "terminal_id"])
+}
+
+fn find_string_key(value: &Value, keys: &[&str]) -> Option<String> {
+    match value {
+        Value::Object(map) => {
+            for key in keys {
+                if let Some(value) = map.get(*key).and_then(Value::as_str) {
+                    return Some(value.to_string());
+                }
+            }
+            for value in map.values() {
+                if let Some(found) = find_string_key(value, keys) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Array(values) => {
+            for value in values {
+                if let Some(found) = find_string_key(value, keys) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn detect_blocker(pane_text: &str) -> Option<(HarnessBlocker, String)> {
+    let lower = pane_text.to_lowercase();
+    if lower.contains("do you trust") || (lower.contains("trust") && lower.contains("folder")) {
+        return Some((HarnessBlocker::Trust, "1".to_string()));
+    }
+    if lower.contains("update") && (lower.contains("available") || lower.contains("new version")) {
+        return Some((HarnessBlocker::Update, "n".to_string()));
+    }
+    if lower.contains("press enter to continue") || lower.contains("continue?") {
+        return Some((HarnessBlocker::Continue, String::new()));
+    }
+    None
+}
+
+fn pane_has_input_prompt(pane_text: &str) -> bool {
+    let Some(line) = pane_text.lines().rev().find(|line| !line.trim().is_empty()) else {
+        return false;
+    };
+    let trimmed = line.trim_end();
+    trimmed.ends_with('›')
+        || trimmed.ends_with('>')
+        || trimmed.ends_with('$')
+        || trimmed.contains("Type something")
+}
+
+fn first_prompt_line(prompt: &str) -> String {
+    prompt
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(80)
+        .collect()
 }
