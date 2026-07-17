@@ -173,6 +173,10 @@ fn print_help() {
     println!("  work-hours    evaluate configured work-hour guard");
     println!("  doctor        debug paths, config, backend, and env");
     println!("  selftest      validate local config/state readability");
+    println!();
+    println!("Notes:");
+    println!("  Outputs are stable, line-oriented, and safe for agents to parse.");
+    println!("  Prefer plan/list/inspect commands; live backend mutations require --exec.");
 }
 
 fn print_state_help() {
