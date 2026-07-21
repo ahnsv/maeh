@@ -487,7 +487,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
     let worktree = temp.path().join("wt");
     fs::write(
         &herdr,
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MAEH_FAKE_LOG\"\nif [ \"$1\" = worktree ]; then printf '{\"result\":{\"workspace_id\":\"w7\",\"path\":\"%s\"}}\\n' \"$MAEH_FAKE_WORKTREE\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = start ]; then case \"$3\" in primary) pane='w7:p2';; critic) pane='w7:p3';; *) pane='w7:p1';; esac; printf '{\"result\":{\"pane_id\":\"%s\"}}\\n' \"$pane\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = read ]; then printf '%s\\n' '{\"result\":{\"read\":{\"text\":\"ready\\n› \"}}}'; exit 0; fi\nprintf '{}\\n'\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MAEH_FAKE_LOG\"\nif [ \"$1\" = worktree ]; then printf '{\"result\":{\"workspace_id\":\"w7\",\"path\":\"%s\"}}\\n' \"$MAEH_FAKE_WORKTREE\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = start ]; then case \"$3\" in *primary) pane='w7:p2';; *critic) pane='w7:p3';; *) pane='w7:p1';; esac; printf '{\"id\":\"cli:agent:start\",\"result\":{\"agent\":{\"pane_id\":\"%s\"}}}\\n' \"$pane\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = read ]; then printf '%s\\n' '{\"result\":{\"read\":{\"text\":\"ready\\n› \"}}}'; exit 0; fi\nprintf '{}\\n'\n",
     )
     .unwrap();
     make_executable(&herdr);
@@ -564,7 +564,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
         .assert()
         .success()
         .stdout(format!(
-            "maeh spawn plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tworktree-create\tw7\tcreate Herdr worktree/workspace\n  argv: [\"{0}\",\"worktree\",\"create\",\"--cwd\",\"/repo\",\"--branch\",\"ha\",\"--base\",\"main\",\"--path\",\"{1}\",\"--label\",\"live\",\"--no-focus\",\"--json\"]\nmutate\tprimary-agent\tw7\tstart primary agent\n  argv: [\"{0}\",\"agent\",\"start\",\"primary\",\"--cwd\",\"{1}\",\"--workspace\",\"$workspace\",\"--split\",\"right\",\"--no-focus\",\"--\",\"codex\",\"primary\"]\nmutate\tcritic-agent\tw7\tstart critic agent\n  argv: [\"{0}\",\"agent\",\"start\",\"critic\",\"--cwd\",\"{1}\",\"--workspace\",\"$workspace\",\"--split\",\"down\",\"--no-focus\",\"--\",\"codex\",\"critic\"]\n",
+            "maeh spawn plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tworktree-create\tw7\tcreate Herdr worktree/workspace\n  argv: [\"{0}\",\"worktree\",\"create\",\"--cwd\",\"/repo\",\"--branch\",\"ha\",\"--base\",\"main\",\"--path\",\"{1}\",\"--label\",\"live\",\"--no-focus\",\"--json\"]\nmutate\tprimary-agent\tw7\tstart primary agent\n  argv: [\"{0}\",\"agent\",\"start\",\"w7-primary\",\"--cwd\",\"{1}\",\"--workspace\",\"$workspace\",\"--split\",\"right\",\"--no-focus\",\"--\",\"codex\",\"primary\"]\nmutate\tcritic-agent\tw7\tstart critic agent\n  argv: [\"{0}\",\"agent\",\"start\",\"w7-critic\",\"--cwd\",\"{1}\",\"--workspace\",\"$workspace\",\"--split\",\"down\",\"--no-focus\",\"--\",\"codex\",\"critic\"]\n",
             herdr.display(),
             worktree.display()
         ));
@@ -1240,7 +1240,7 @@ fn slot_spawn_and_agent_contract_cover_aliases_and_exec() {
     let worktree = temp.path().join("spawned-wt");
     fs::write(
         &herdr,
-        "#!/bin/sh\nprintf '%s\n' \"$*\" >> \"$MAEH_FAKE_LOG\"\nif [ \"$1\" = worktree ]; then printf '{\"result\":{\"workspace_id\":\"wspawn\",\"path\":\"%s\"}}\\n' \"$MAEH_FAKE_WORKTREE\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = start ]; then case \"$3\" in primary) pane='wspawn:p';; critic) pane='wspawn:c';; *) pane='wspawn:e';; esac; printf '{\"result\":{\"pane_id\":\"%s\"}}\\n' \"$pane\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = read ]; then printf '%s\\n' '{\"result\":{\"read\":{\"text\":\"ready\\n› \"}}}'; exit 0; fi\nprintf '{}\\n'\n",
+        "#!/bin/sh\nprintf '%s\n' \"$*\" >> \"$MAEH_FAKE_LOG\"\nif [ \"$1\" = worktree ]; then printf '{\"result\":{\"workspace_id\":\"wspawn\",\"path\":\"%s\"}}\\n' \"$MAEH_FAKE_WORKTREE\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = start ]; then case \"$3\" in *primary) pane='wspawn:p';; *critic) pane='wspawn:c';; *) pane='wspawn:e';; esac; printf '{\"id\":\"cli:agent:start\",\"result\":{\"agent\":{\"pane_id\":\"%s\"}}}\\n' \"$pane\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = read ]; then printf '%s\\n' '{\"result\":{\"read\":{\"text\":\"ready\\n› \"}}}'; exit 0; fi\nprintf '{}\\n'\n",
     )
     .unwrap();
     make_executable(&herdr);
@@ -1385,7 +1385,9 @@ fn slot_spawn_and_agent_contract_cover_aliases_and_exec() {
 
     let log = fs::read_to_string(&herdr_log).unwrap();
     assert!(log.contains("worktree create --cwd /repo --branch feat/spawned --base HEAD --path /tmp/spawned --label spawned --no-focus --json"));
-    assert!(log.contains("agent start primary --cwd "));
+    assert!(log.contains("agent start spawned-primary --cwd "));
+    assert!(log.contains("agent start spawned-critic --cwd "));
+    assert!(log.contains("agent start spawned-editor --cwd "));
     assert!(log.contains(" --workspace wspawn --split right --no-focus -- codex primary"));
     assert!(log.contains(" --workspace wspawn --split down --no-focus -- codex critic"));
     assert!(log.contains(" --workspace wspawn --split right --no-focus -- vi edit"));

@@ -833,12 +833,15 @@ impl BackendAdapter for HerdrBackend {
             display_path(&request.worktree.path)
         };
         let workspace = "$workspace";
+        let editor_name = herdr_agent_name(&request.worktree.slot, "editor");
+        let primary_name = herdr_agent_name(&request.worktree.slot, "primary");
+        let critic_name = herdr_agent_name(&request.worktree.slot, "critic");
         if request.worktree.layout.include_editor && !request.editor_cmd.is_empty() {
             operations.push(OperationPlan::mutate_command(
                 "editor-pane",
                 &request.worktree.slot,
                 "start editor pane".to_string(),
-                self.agent_start_spec("editor", &path, workspace, "right", &request.editor_cmd),
+                self.agent_start_spec(&editor_name, &path, workspace, "right", &request.editor_cmd),
             ));
         }
         operations.push(OperationPlan::mutate_command(
@@ -846,7 +849,7 @@ impl BackendAdapter for HerdrBackend {
             &request.worktree.slot,
             "start primary agent".to_string(),
             self.agent_start_spec(
-                "primary",
+                &primary_name,
                 &path,
                 workspace,
                 "right",
@@ -858,7 +861,7 @@ impl BackendAdapter for HerdrBackend {
             &request.worktree.slot,
             "start critic agent".to_string(),
             self.agent_start_spec(
-                "critic",
+                &critic_name,
                 &path,
                 workspace,
                 "down",
@@ -898,8 +901,9 @@ impl BackendAdapter for HerdrBackend {
         let worktree = self.execute_worktree(runner, &request.worktree)?;
         let editor_pane =
             if request.worktree.layout.include_editor && !request.editor_cmd.is_empty() {
+                let editor_name = herdr_agent_name(&request.worktree.slot, "editor");
                 let editor_spec = self.agent_start_spec(
-                    "editor",
+                    &editor_name,
                     &worktree.worktree,
                     &worktree.workspace_id,
                     "right",
@@ -910,16 +914,18 @@ impl BackendAdapter for HerdrBackend {
             } else {
                 String::new()
             };
+        let primary_name = herdr_agent_name(&request.worktree.slot, "primary");
         let primary_spec = self.agent_start_spec(
-            "primary",
+            &primary_name,
             &worktree.worktree,
             &worktree.workspace_id,
             "right",
             &request.primary_agent_cmd,
         );
         let primary_output = run_ok(runner, &primary_spec)?;
+        let critic_name = herdr_agent_name(&request.worktree.slot, "critic");
         let critic_spec = self.agent_start_spec(
-            "critic",
+            &critic_name,
             &worktree.worktree,
             &worktree.workspace_id,
             "down",
@@ -1412,6 +1418,26 @@ fn first_agent_pane(panes: &[&Value], name: &str) -> String {
     String::new()
 }
 
+fn herdr_agent_name(slot: &str, role: &str) -> String {
+    let slug = slot
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if slug.is_empty() {
+        role.to_string()
+    } else {
+        format!("{slug}-{role}")
+    }
+}
+
 fn display_path(path: &std::path::Path) -> String {
     path.display().to_string()
 }
@@ -1433,7 +1459,9 @@ fn parse_tmux_window_pane(stdout: &str) -> Result<(String, String), BackendError
 
 fn parse_pane_id(stdout: &str) -> Option<String> {
     let payload = serde_json::from_str::<Value>(stdout).ok()?;
-    find_string_key(&payload, &["pane_id", "id", "terminal_id"])
+    find_string_key(&payload, &["pane_id"])
+        .or_else(|| find_string_key(&payload, &["terminal_id"]))
+        .or_else(|| find_string_key(&payload, &["id"]))
 }
 
 fn find_string_key(value: &Value, keys: &[&str]) -> Option<String> {
