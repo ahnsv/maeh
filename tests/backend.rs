@@ -421,8 +421,8 @@ fn execute_worktree_and_spawn_persist_real_backend_ids() {
     let mut runner = FakeRunner {
         outputs: vec![
             output(r#"{"result":{"workspace_id":"w9","path":"/repo/.worktrees/live"}}"#),
-            output(r#"{"result":{"pane_id":"w9:p2"}}"#),
-            output(r#"{"result":{"pane_id":"w9:p3"}}"#),
+            output(r#"{"id":"cli:agent:start","result":{"agent":{"pane_id":"w9:p2"}}}"#),
+            output(r#"{"id":"cli:agent:start","result":{"agent":{"pane_id":"w9:p3"}}}"#),
         ],
         specs: Vec::new(),
     };
@@ -432,6 +432,8 @@ fn execute_worktree_and_spawn_persist_real_backend_ids() {
     assert_eq!(spawn.primary_pane, "w9:p2");
     assert_eq!(spawn.critic_pane, "w9:p3");
     assert_eq!(spawn.editor_pane, "");
+    assert_eq!(runner.specs[1].args[2], "slot-a-primary");
+    assert_eq!(runner.specs[2].args[2], "slot-a-critic");
 
     let mut tmux_runner = FakeRunner {
         outputs: vec![output(""), output("@9\t%1\n"), output("%3\n")],
