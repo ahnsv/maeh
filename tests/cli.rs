@@ -81,16 +81,167 @@ fn local_work_time() -> (u32, u32, bool) {
 }
 
 #[test]
-fn help_output_is_styled_and_lists_core_commands() {
+fn help_version_and_command_help_cover_existing_commands() {
     maeh().assert().success().stdout(
-        "Typed orchestration CLI for hmph and Herdr agents\n\nUsage: maeh [--home PATH] <command>\n\nExamples:\n  maeh init\n  maeh doctor\n\nRun `maeh --help` for the full command list.\n",
+        "Typed orchestration CLI for hmph and Herdr agents\n\nUsage: maeh [--home PATH] <command>\n\nExamples:\n  maeh init\n  maeh doctor\n\nRun `maeh --help` for the full command list and `maeh <command> --help` for details.\n",
     );
-    maeh().arg("--help").assert().success().stdout(
-        "Typed orchestration CLI for hmph and Herdr agents\n\nUsage: maeh [--home PATH] <command>\n\nExamples:\n  maeh init\n  maeh backend list-task-slots\n  maeh prompt kickoff --url <task-url>\n  maeh doctor\n\nOptions:\n  -h, --help     print help\n  --home PATH    use alternate state directory (defaults to MAEH_HOME or ~/.maeh)\n\nCommands:\n  init          create local state directories and config\n  config        path, show, or emit config\n  ledger        append or list JSONL spans\n  state         tag, untag, get, list, worktree, delete-slot\n  board-cache   put or get tracker board snapshots\n  capsule       put, get, or prompt compact task context\n  prompt        render kickoff prompts\n  backend       plan or dry-run backend discovery/reconciliation\n  worktree      plan or open backend worktrees/workspaces\n  workspace     register or spawn backend workspaces\n  spawn         plan or run worktree plus primary/critic agents\n  agent         deliver prompts through backend adapters\n  kickoff       plan or deliver queued prompts to agent panes\n  verify        verify prompt or slot execution evidence\n  slot          list, inspect, classify, or mutate managed slots\n  cleanup       cleanup-oriented slot wrappers\n  revamp        revamp-oriented stale slot wrappers\n  status        backend-aware slot status reports\n  cap           check configured work/review caps\n  statusline    print compact pool status\n  work-hours    evaluate configured work-hour guard\n  doctor        debug paths, config, backend, and env\n  selftest      validate local config/state readability\n\nNotes:\n  Outputs are stable, line-oriented, and safe for humans and agents to parse.\n  Prefer plan/list/inspect commands; live backend mutations require --exec.\n  Success output goes to stdout; errors and diagnostics go to stderr.\n",
-    );
-    maeh().args(["state", "--help"]).assert().success().stdout(
-        "Manage local slot state\nUsage: maeh state <tag|untag|get|list|worktree|delete-slot>\n",
-    );
+    maeh()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(format!("maeh {}\n", env!("CARGO_PKG_VERSION")));
+    let temp = TempDir::new().unwrap();
+    maeh().arg("--home").arg(temp.path()).assert().success();
+    maeh()
+        .arg("--home")
+        .arg(temp.path())
+        .arg("--help")
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(temp.path())
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(format!("maeh {}\n", env!("CARGO_PKG_VERSION")));
+    maeh()
+        .args(["wat", "--help"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: unknown command wat\n");
+
+    let output = maeh().arg("--help").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Usage:\n  maeh [GLOBAL OPTIONS] <command> [ARGS]\n"));
+    assert!(stdout.contains("  -V, --version    print version\n"));
+    assert!(stdout.contains("Run `maeh <command> --help` for command-specific usage"));
+
+    for command in [
+        "init",
+        "config",
+        "ledger",
+        "state",
+        "board-cache",
+        "capsule",
+        "prompt",
+        "backend",
+        "worktree",
+        "workspace",
+        "spawn",
+        "agent",
+        "kickoff",
+        "verify",
+        "slot",
+        "cleanup",
+        "revamp",
+        "status",
+        "cap",
+        "statusline",
+        "work-hours",
+        "doctor",
+        "selftest",
+    ] {
+        assert!(
+            stdout.contains(&format!("  {command}")),
+            "root help missing {command}"
+        );
+        let output = maeh().args([command, "--help"]).output().unwrap();
+        assert!(output.status.success(), "{command} --help failed");
+        let help = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            help.starts_with(&format!("maeh {command}\n")),
+            "bad title for {command}: {help}"
+        );
+        assert!(
+            help.contains("Description:\n"),
+            "missing description for {command}"
+        );
+        assert!(help.contains("Usage:\n"), "missing usage for {command}");
+        assert!(
+            help.contains("Examples:\n"),
+            "missing examples for {command}"
+        );
+    }
+
+    let expected_subcommands: &[(&str, &[&str])] = &[
+        ("config", &["path", "show", "emit"]),
+        ("ledger", &["append", "list"]),
+        (
+            "state",
+            &["tag", "untag", "get", "list", "worktree", "delete-slot"],
+        ),
+        ("board-cache", &["put", "get"]),
+        ("capsule", &["put", "get", "prompt"]),
+        ("prompt", &["kickoff"]),
+        (
+            "backend",
+            &[
+                "plan",
+                "discover",
+                "reconcile",
+                "list-task-slots",
+                "list-worktrees",
+            ],
+        ),
+        ("worktree", &["plan", "open"]),
+        ("workspace", &["register", "spawn"]),
+        ("spawn", &["plan", "run"]),
+        ("agent", &["deliver"]),
+        ("kickoff", &["plan", "run"]),
+        ("verify", &["prompt", "slot"]),
+        (
+            "slot",
+            &[
+                "spawn",
+                "verify",
+                "close",
+                "list",
+                "inspect",
+                "classify",
+                "snooze",
+                "block",
+                "resume",
+                "nudge",
+                "remove-worktree",
+                "worktree-remove",
+                "count",
+            ],
+        ),
+        ("cleanup", &["list", "inspect", "close", "summary"]),
+        (
+            "revamp",
+            &[
+                "list", "inspect", "snooze", "block", "resume", "nudge", "summary",
+            ],
+        ),
+        ("status", &["list", "inspect", "worktrees"]),
+        ("cap", &["check"]),
+    ];
+    for (command, subcommands) in expected_subcommands {
+        let output = maeh().args([*command, "--help"]).output().unwrap();
+        let help = String::from_utf8(output.stdout).unwrap();
+        for subcommand in *subcommands {
+            assert!(
+                help.contains(&format!("  {subcommand}")),
+                "{command} help missing {subcommand}"
+            );
+            let output = maeh()
+                .args([*command, *subcommand, "--help"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{command} {subcommand} --help failed"
+            );
+            let subcommand_help = String::from_utf8(output.stdout).unwrap();
+            assert!(
+                subcommand_help.starts_with(&format!("maeh {command}\n")),
+                "{command} {subcommand} --help did not print command help"
+            );
+        }
+    }
 }
 
 #[test]
