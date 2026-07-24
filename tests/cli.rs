@@ -203,6 +203,7 @@ fn help_version_and_command_help_cover_existing_commands() {
                 "snooze",
                 "block",
                 "resume",
+                "review",
                 "nudge",
                 "remove-worktree",
                 "worktree-remove",
@@ -641,7 +642,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
     let worktree = temp.path().join("wt");
     fs::write(
         &herdr,
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MAEH_FAKE_LOG\"\nif [ \"$1\" = worktree ]; then printf '{\"result\":{\"workspace_id\":\"w7\",\"path\":\"%s\"}}\\n' \"$MAEH_FAKE_WORKTREE\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = start ]; then case \"$3\" in primary) pane='w7:p2';; critic) pane='w7:p3';; *) pane='w7:p1';; esac; printf '{\"result\":{\"pane_id\":\"%s\"}}\\n' \"$pane\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = read ]; then printf '%s\\n' '{\"result\":{\"read\":{\"text\":\"ready\\n› \"}}}'; exit 0; fi\nprintf '{}\\n'\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MAEH_FAKE_LOG\"\nif [ \"$1\" = worktree ]; then printf '{\"id\":\"cli:worktree\",\"result\":{\"type\":\"worktree_created\",\"workspace\":{\"workspace_id\":\"w7\"},\"root_pane\":{\"pane_id\":\"w7:p1\"},\"worktree\":{\"path\":\"%s\"}}}\\n' \"$MAEH_FAKE_WORKTREE\"; exit 0; fi\nif [ \"$1\" = pane ] && [ \"$2\" = split ]; then pane='w7:p3'; if [ \"$6\" = right ]; then pane='w7:p2'; fi; printf '{\"id\":\"cli:pane:split\",\"result\":{\"type\":\"pane_info\",\"pane\":{\"pane_id\":\"%s\"}}}\\n' \"$pane\"; exit 0; fi\nif [ \"$1\" = pane ] && [ \"$2\" = run ]; then printf '{\"id\":\"cli:pane:run\",\"result\":{\"type\":\"pane_info\",\"pane\":{\"pane_id\":\"%s\"}}}\\n' \"$3\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = start ]; then printf '{\"id\":\"cli:agent:start\",\"result\":{\"type\":\"agent_started\",\"agent\":{\"pane_id\":\"%s\"}}}\\n' \"$7\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = read ]; then printf '%s\\n' '{\"result\":{\"read\":{\"text\":\"ready\\n› \"}}}'; exit 0; fi\nprintf '{}\\n'\n",
     )
     .unwrap();
     make_executable(&herdr);
@@ -718,7 +719,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
         .assert()
         .success()
         .stdout(format!(
-            "maeh spawn plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tworktree-create\tw7\tcreate Herdr worktree/workspace\n  argv: [\"{0}\",\"worktree\",\"create\",\"--cwd\",\"/repo\",\"--branch\",\"ha\",\"--base\",\"main\",\"--path\",\"{1}\",\"--label\",\"live\",\"--no-focus\",\"--json\"]\nmutate\tprimary-agent\tw7\tstart primary agent\n  argv: [\"{0}\",\"agent\",\"start\",\"primary\",\"--cwd\",\"{1}\",\"--workspace\",\"$workspace\",\"--split\",\"right\",\"--no-focus\",\"--\",\"codex\",\"primary\"]\nmutate\tcritic-agent\tw7\tstart critic agent\n  argv: [\"{0}\",\"agent\",\"start\",\"critic\",\"--cwd\",\"{1}\",\"--workspace\",\"$workspace\",\"--split\",\"down\",\"--no-focus\",\"--\",\"codex\",\"critic\"]\n",
+            "maeh spawn plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tworktree-create\tw7\tcreate Herdr worktree/workspace\n  argv: [\"{0}\",\"worktree\",\"create\",\"--cwd\",\"/repo\",\"--branch\",\"ha\",\"--base\",\"main\",\"--path\",\"{1}\",\"--label\",\"live\",\"--no-focus\",\"--json\"]\nmutate\tcritic-pane\tw7\tsplit critic pane\n  argv: [\"{0}\",\"pane\",\"split\",\"--pane\",\"$root_pane\",\"--direction\",\"down\",\"--cwd\",\"{1}\",\"--no-focus\"]\nmutate\tprimary-agent\tw7\tstart primary agent\n  argv: [\"{0}\",\"agent\",\"start\",\"w7-primary\",\"--kind\",\"codex\",\"--pane\",\"$root_pane\",\"--\",\"primary\"]\nmutate\tcritic-agent\tw7\tstart critic agent\n  argv: [\"{0}\",\"agent\",\"start\",\"w7-critic\",\"--kind\",\"codex\",\"--pane\",\"$critic_pane\",\"--\",\"critic\"]\n",
             herdr.display(),
             worktree.display()
         ));
@@ -737,7 +738,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
         .assert()
         .success()
         .stdout(format!(
-            "maeh spawn run\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nworktree opened\n  slot: w7\n  workspace: w7\n  path: {1}\n  primary pane: w7:p2\n  critic pane: w7:p3\n",
+            "maeh spawn run\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nworktree opened\n  slot: w7\n  workspace: w7\n  path: {1}\n  primary pane: w7:p1\n  critic pane: w7:p3\n",
             herdr.display(),
             worktree.display()
         ));
@@ -747,7 +748,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
         .args(["state", "get", "w7", "primary_pane"])
         .assert()
         .success()
-        .stdout("w7:p2\n");
+        .stdout("w7:p1\n");
 
     maeh()
         .arg("--home")
@@ -783,17 +784,17 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
     maeh()
         .arg("--home")
         .arg(&home)
-        .args(["kickoff", "plan", "--target", "w7:p2", "--pane-text", "ready\n› ", "--prompt", "Do it"])
+        .args(["kickoff", "plan", "--target", "w7:p1", "--pane-text", "ready\n› ", "--prompt", "Do it"])
         .assert()
         .success()
         .stdout(format!(
-            "maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsend-text\tw7:p2\tsend 5 chars plus explicit Enter\n  argv: [\"{0}\",\"agent\",\"send\",\"w7:p2\",\"Do it\"]\nmutate\tsubmit-enter\tw7:p2\tsend 5 chars plus explicit Enter\n  argv: [\"{0}\",\"pane\",\"send-keys\",\"w7:p2\",\"Enter\"]\n",
+            "maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: {0}\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsubmit-prompt\tw7:p1\tsubmit 5 chars with pane run\n  argv: [\"{0}\",\"pane\",\"run\",\"w7:p1\",\"Do it\"]\n",
             herdr.display()
         ));
     maeh()
         .arg("--home")
         .arg(&home)
-        .args(["kickoff", "run", "--target", "w7:p2", "--prompt", "Do it"])
+        .args(["kickoff", "run", "--target", "w7:p1", "--prompt", "Do it"])
         .env("MAEH_FAKE_LOG", &herdr_log)
         .env("MAEH_FAKE_WORKTREE", &worktree)
         .assert()
@@ -805,7 +806,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
             "kickoff",
             "run",
             "--target",
-            "w7:p2",
+            "w7:p1",
             "--pane-text",
             "ready\n› ",
             "--prompt",
@@ -822,7 +823,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
     maeh()
         .arg("--home")
         .arg(&home)
-        .args(["kickoff", "plan", "--target", "w7:p2", "--prompt-file"])
+        .args(["kickoff", "plan", "--target", "w7:p1", "--prompt-file"])
         .arg(&prompt_file)
         .arg("--pane-file")
         .arg(&pane_file)
@@ -834,7 +835,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
         .args([
             "agent",
             "deliver",
-            "w7:p2",
+            "w7:p1",
             "Do positional",
             "--pane-text",
             "ready\n› ",
@@ -845,10 +846,10 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
         .assert()
         .success();
     let log = fs::read_to_string(&herdr_log).unwrap();
-    assert!(log.contains("agent send w7:p2 Do it"));
-    assert!(log.contains("agent send w7:p2 Do again"));
-    assert!(log.contains("agent send w7:p2 Do positional"));
-    assert!(log.contains("pane send-keys w7:p2 Enter"));
+    assert!(log.contains("pane run w7:p1 Do it"));
+    assert!(log.contains("pane run w7:p1 Do again"));
+    assert!(log.contains("pane run w7:p1 Do positional"));
+    assert!(!log.contains("agent send"));
 
     maeh()
         .args([
@@ -978,14 +979,14 @@ fn kickoff_cli_handles_blockers_and_noops_without_pasting_task_prompt() {
         .args(["kickoff", "plan", "--target", "p", "--pane-text", "Do you trust this folder?", "--prompt", "Do it"])
         .assert()
         .success()
-        .stdout("maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsend-text\tp\tanswer trust blocker with 1 plus explicit Enter\n  argv: [\"herdr\",\"agent\",\"send\",\"p\",\"1\"]\nmutate\tsubmit-enter\tp\tanswer trust blocker with 1 plus explicit Enter\n  argv: [\"herdr\",\"pane\",\"send-keys\",\"p\",\"Enter\"]\n");
+        .stdout("maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsend-text\tp\tanswer trust blocker with 1 plus explicit Enter\n  argv: [\"herdr\",\"pane\",\"send-text\",\"p\",\"1\"]\nmutate\tsubmit-enter\tp\tanswer trust blocker with 1 plus explicit Enter\n  argv: [\"herdr\",\"pane\",\"send-keys\",\"p\",\"Enter\"]\n");
     maeh()
         .arg("--home")
         .arg(&home)
         .args(["kickoff", "plan", "--target", "p", "--pane-text", "Update available. Install?", "--prompt", "Do it"])
         .assert()
         .success()
-        .stdout("maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsend-text\tp\tanswer update blocker with n plus explicit Enter\n  argv: [\"herdr\",\"agent\",\"send\",\"p\",\"n\"]\nmutate\tsubmit-enter\tp\tanswer update blocker with n plus explicit Enter\n  argv: [\"herdr\",\"pane\",\"send-keys\",\"p\",\"Enter\"]\n");
+        .stdout("maeh kickoff plan\n  requested backend: herdr\n  selected backend: herdr\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\nmutate\tsend-text\tp\tanswer update blocker with n plus explicit Enter\n  argv: [\"herdr\",\"pane\",\"send-text\",\"p\",\"n\"]\nmutate\tsubmit-enter\tp\tanswer update blocker with n plus explicit Enter\n  argv: [\"herdr\",\"pane\",\"send-keys\",\"p\",\"Enter\"]\n");
     maeh()
         .arg("--home")
         .arg(&home)
@@ -1109,6 +1110,81 @@ fn slot_lifecycle_contract_matches_skills_calls() {
         .assert()
         .success()
         .stdout("maeh backend list-task-slots\n  requested backend: auto\n  selected backend: tmux\n  herdr bin: herdr\n  tmux bin: tmux\n  tmux session: maeh\ns1\thttps://task\tblocked\t172900\t0\t\tp1\tp2\t/tmp/wt\ns2\t\tblocked\t0\t0\t\tp3\tp4\t/tmp/wt2\n");
+}
+
+#[test]
+fn slot_review_transition_preserves_metadata_and_counts_only_review_cap() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("state");
+    init_home(&home);
+    fs::write(
+        home.join("config.toml"),
+        "backend = 'tmux'\ncontext_switch_cap = 1\nreview_cap = 2\n",
+    )
+    .unwrap();
+    register_slot(
+        &home,
+        "also-review",
+        "tmux",
+        "review",
+        "/tmp/review",
+        "/repo",
+    );
+    register_slot(&home, "work", "tmux", "active", "/tmp/work", "/repo");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "tag", "work", "pr_url", "https://pr/1"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["slot", "review", "work"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "get", "work", "status"])
+        .assert()
+        .success()
+        .stdout("review\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "get", "work", "pr_url"])
+        .assert()
+        .success()
+        .stdout("https://pr/1\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "get", "work", "worktree"])
+        .assert()
+        .success()
+        .stdout("/tmp/work\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["slot", "list", "--status", "review"])
+        .assert()
+        .success()
+        .stdout("also-review\thttps://tasks/also-review\treview\t0\t0\treview\t\t/tmp/review\talso-review:p\talso-review:c\t/repo\nwork\thttps://tasks/work\treview\t0\t0\treview\t\t/tmp/work\twork:p\twork:c\t/repo\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["cap", "check"])
+        .assert()
+        .success()
+        .stdout("cap check\n  work: 0/1\n  review: 2/2\n  work available: true\n  review available: false\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .arg("statusline")
+        .assert()
+        .success()
+        .stdout("maeh W:0/1 R:2/2\n");
 }
 
 #[test]
@@ -1394,7 +1470,7 @@ fn slot_spawn_and_agent_contract_cover_aliases_and_exec() {
     let worktree = temp.path().join("spawned-wt");
     fs::write(
         &herdr,
-        "#!/bin/sh\nprintf '%s\n' \"$*\" >> \"$MAEH_FAKE_LOG\"\nif [ \"$1\" = worktree ]; then printf '{\"result\":{\"workspace_id\":\"wspawn\",\"path\":\"%s\"}}\\n' \"$MAEH_FAKE_WORKTREE\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = start ]; then case \"$3\" in primary) pane='wspawn:p';; critic) pane='wspawn:c';; *) pane='wspawn:e';; esac; printf '{\"result\":{\"pane_id\":\"%s\"}}\\n' \"$pane\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = read ]; then printf '%s\\n' '{\"result\":{\"read\":{\"text\":\"ready\\n› \"}}}'; exit 0; fi\nprintf '{}\\n'\n",
+        "#!/bin/sh\nprintf '%s\n' \"$*\" >> \"$MAEH_FAKE_LOG\"\nif [ \"$1\" = worktree ]; then printf '{\"id\":\"cli:worktree\",\"result\":{\"type\":\"worktree_created\",\"workspace\":{\"workspace_id\":\"wspawn\"},\"root_pane\":{\"pane_id\":\"wspawn:root\"},\"worktree\":{\"path\":\"%s\"}}}\\n' \"$MAEH_FAKE_WORKTREE\"; exit 0; fi\nif [ \"$1\" = pane ] && [ \"$2\" = split ]; then pane='wspawn:c'; if [ \"$6\" = right ]; then pane='wspawn:p'; fi; printf '{\"id\":\"cli:pane:split\",\"result\":{\"type\":\"pane_info\",\"pane\":{\"pane_id\":\"%s\"}}}\\n' \"$pane\"; exit 0; fi\nif [ \"$1\" = pane ] && [ \"$2\" = run ]; then printf '{\"id\":\"cli:pane:run\",\"result\":{\"type\":\"pane_info\",\"pane\":{\"pane_id\":\"%s\"}}}\\n' \"$3\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = start ]; then printf '{\"id\":\"cli:agent:start\",\"result\":{\"type\":\"agent_started\",\"agent\":{\"pane_id\":\"%s\"}}}\\n' \"$7\"; exit 0; fi\nif [ \"$1\" = agent ] && [ \"$2\" = read ]; then printf '%s\\n' '{\"result\":{\"read\":{\"text\":\"ready\\n› \"}}}'; exit 0; fi\nprintf '{}\\n'\n",
     )
     .unwrap();
     make_executable(&herdr);
@@ -1539,12 +1615,14 @@ fn slot_spawn_and_agent_contract_cover_aliases_and_exec() {
 
     let log = fs::read_to_string(&herdr_log).unwrap();
     assert!(log.contains("worktree create --cwd /repo --branch feat/spawned --base HEAD --path /tmp/spawned --label spawned --no-focus --json"));
-    assert!(log.contains("agent start primary --cwd "));
-    assert!(log.contains(" --workspace wspawn --split right --no-focus -- codex primary"));
-    assert!(log.contains(" --workspace wspawn --split down --no-focus -- codex critic"));
-    assert!(log.contains(" --workspace wspawn --split right --no-focus -- vi edit"));
-    assert!(log.contains("agent send wspawn:c Go"));
-    assert!(log.contains("agent send wspawn:c Again"));
+    assert!(log.contains("pane split --pane wspawn:root --direction right --cwd "));
+    assert!(log.contains("pane split --pane wspawn:root --direction down --cwd "));
+    assert!(log.contains("pane run wspawn:root vi edit"));
+    assert!(log.contains("agent start spawned-primary --kind codex --pane wspawn:p -- primary"));
+    assert!(log.contains("agent start spawned-critic --kind codex --pane wspawn:c -- critic"));
+    assert!(log.contains("pane run wspawn:c Go"));
+    assert!(log.contains("pane run wspawn:c Again"));
+    assert!(!log.contains("agent send"));
 }
 
 #[test]

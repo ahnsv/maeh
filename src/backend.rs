@@ -697,29 +697,83 @@ impl HerdrBackend {
         CommandSpec::from_args(&self.bin, args)
     }
 
-    fn agent_start_spec(
-        &self,
-        name: &str,
-        path: &str,
-        workspace: &str,
-        split: &str,
-        command: &[String],
-    ) -> CommandSpec {
+    fn pane_split_spec(&self, target: &str, path: &str, direction: &str) -> CommandSpec {
+        CommandSpec::from_args(
+            &self.bin,
+            vec![
+                "pane".to_string(),
+                "split".to_string(),
+                "--pane".to_string(),
+                target.to_string(),
+                "--direction".to_string(),
+                direction.to_string(),
+                "--cwd".to_string(),
+                path.to_string(),
+                "--no-focus".to_string(),
+            ],
+        )
+    }
+
+    fn pane_run_spec(&self, target: &str, command: &[String]) -> CommandSpec {
+        let mut args = vec!["pane".to_string(), "run".to_string(), target.to_string()];
+        args.extend(command.iter().cloned());
+        CommandSpec::from_args(&self.bin, args)
+    }
+
+    fn agent_start_spec(&self, name: &str, pane: &str, command: &[String]) -> CommandSpec {
         let mut args = vec![
             "agent".to_string(),
             "start".to_string(),
             name.to_string(),
-            "--cwd".to_string(),
-            path.to_string(),
-            "--workspace".to_string(),
-            workspace.to_string(),
-            "--split".to_string(),
-            split.to_string(),
-            "--no-focus".to_string(),
-            "--".to_string(),
+            "--kind".to_string(),
+            command.first().cloned().unwrap_or_else(|| name.to_string()),
+            "--pane".to_string(),
+            pane.to_string(),
         ];
-        args.extend(command.iter().cloned());
+        if command.len() > 1 {
+            args.push("--".to_string());
+            args.extend(command.iter().skip(1).cloned());
+        }
         CommandSpec::from_args(&self.bin, args)
+    }
+
+    fn execute_worktree_with_root(
+        &self,
+        runner: &mut dyn CommandRunner,
+        request: &WorktreeRequest,
+    ) -> Result<(WorktreeRecord, String), BackendError> {
+        let output = run_ok(runner, &self.worktree_spec(request))?;
+        let payload: Value = serde_json::from_str(&output.stdout)?;
+        let result = required_result(&payload)?;
+        let workspace_id = result
+            .pointer("/workspace/workspace_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                BackendError::Parse("herdr worktree output missing workspace id".to_string())
+            })?
+            .to_string();
+        let root_pane = result
+            .pointer("/root_pane/pane_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                BackendError::Parse("herdr worktree output missing root pane id".to_string())
+            })?
+            .to_string();
+        let worktree = result
+            .pointer("/worktree/path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| BackendError::Parse("herdr worktree output missing path".to_string()))?
+            .to_string();
+        Ok((
+            WorktreeRecord {
+                backend: BackendKind::Herdr,
+                slot: request.slot.clone(),
+                workspace_id,
+                window_id: String::new(),
+                worktree,
+            },
+            root_pane,
+        ))
     }
 }
 
@@ -832,13 +886,28 @@ impl BackendAdapter for HerdrBackend {
         } else {
             display_path(&request.worktree.path)
         };
-        let workspace = "$workspace";
+        let mut primary_pane = "$root_pane";
+        if request.worktree.layout.include_editor && !request.editor_cmd.is_empty() {
+            operations.push(OperationPlan::mutate_command(
+                "primary-pane",
+                &request.worktree.slot,
+                "split primary pane".to_string(),
+                self.pane_split_spec("$root_pane", &path, "right"),
+            ));
+            primary_pane = "$primary_pane";
+        }
+        operations.push(OperationPlan::mutate_command(
+            "critic-pane",
+            &request.worktree.slot,
+            "split critic pane".to_string(),
+            self.pane_split_spec("$root_pane", &path, "down"),
+        ));
         if request.worktree.layout.include_editor && !request.editor_cmd.is_empty() {
             operations.push(OperationPlan::mutate_command(
                 "editor-pane",
                 &request.worktree.slot,
-                "start editor pane".to_string(),
-                self.agent_start_spec("editor", &path, workspace, "right", &request.editor_cmd),
+                "run editor in root pane".to_string(),
+                self.pane_run_spec("$root_pane", &request.editor_cmd),
             ));
         }
         operations.push(OperationPlan::mutate_command(
@@ -846,10 +915,8 @@ impl BackendAdapter for HerdrBackend {
             &request.worktree.slot,
             "start primary agent".to_string(),
             self.agent_start_spec(
-                "primary",
-                &path,
-                workspace,
-                "right",
+                &herdr_agent_name(&request.worktree.slot, "primary"),
+                primary_pane,
                 &request.primary_agent_cmd,
             ),
         ));
@@ -858,10 +925,8 @@ impl BackendAdapter for HerdrBackend {
             &request.worktree.slot,
             "start critic agent".to_string(),
             self.agent_start_spec(
-                "critic",
-                &path,
-                workspace,
-                "down",
+                &herdr_agent_name(&request.worktree.slot, "critic"),
+                "$critic_pane",
                 &request.critic_agent_cmd,
             ),
         ));
@@ -873,21 +938,8 @@ impl BackendAdapter for HerdrBackend {
         runner: &mut dyn CommandRunner,
         request: &WorktreeRequest,
     ) -> Result<WorktreeRecord, BackendError> {
-        let output = run_ok(runner, &self.worktree_spec(request))?;
-        let payload: Value = serde_json::from_str(&output.stdout)?;
-        let workspace_id = find_string_key(&payload, &["workspace_id", "open_workspace_id"])
-            .ok_or_else(|| {
-                BackendError::Parse("herdr worktree output missing workspace id".to_string())
-            })?;
-        let worktree = find_string_key(&payload, &["path", "checkout_path"])
-            .unwrap_or_else(|| display_path(&request.path));
-        Ok(WorktreeRecord {
-            backend: BackendKind::Herdr,
-            slot: request.slot.clone(),
-            workspace_id,
-            window_id: String::new(),
-            worktree,
-        })
+        let (worktree, _) = self.execute_worktree_with_root(runner, request)?;
+        Ok(worktree)
     }
 
     fn execute_spawn(
@@ -895,41 +947,48 @@ impl BackendAdapter for HerdrBackend {
         runner: &mut dyn CommandRunner,
         request: &SpawnRequest,
     ) -> Result<SpawnRecord, BackendError> {
-        let worktree = self.execute_worktree(runner, &request.worktree)?;
-        let editor_pane =
-            if request.worktree.layout.include_editor && !request.editor_cmd.is_empty() {
-                let editor_spec = self.agent_start_spec(
-                    "editor",
-                    &worktree.worktree,
-                    &worktree.workspace_id,
-                    "right",
-                    &request.editor_cmd,
-                );
-                let output = run_ok(runner, &editor_spec)?;
-                parse_pane_id(&output.stdout).unwrap_or_default()
-            } else {
-                String::new()
-            };
-        let primary_spec = self.agent_start_spec(
-            "primary",
-            &worktree.worktree,
-            &worktree.workspace_id,
-            "right",
-            &request.primary_agent_cmd,
-        );
-        let primary_output = run_ok(runner, &primary_spec)?;
-        let critic_spec = self.agent_start_spec(
-            "critic",
-            &worktree.worktree,
-            &worktree.workspace_id,
-            "down",
-            &request.critic_agent_cmd,
-        );
-        let critic_output = run_ok(runner, &critic_spec)?;
+        let (worktree, root_pane) = self.execute_worktree_with_root(runner, &request.worktree)?;
+        let has_editor = request.worktree.layout.include_editor && !request.editor_cmd.is_empty();
+        let primary_pane = if has_editor {
+            let primary_output = run_ok(
+                runner,
+                &self.pane_split_spec(&root_pane, &worktree.worktree, "right"),
+            )?;
+            parse_required_pane_id(&primary_output.stdout)?
+        } else {
+            root_pane.clone()
+        };
+        let critic_output = run_ok(
+            runner,
+            &self.pane_split_spec(&root_pane, &worktree.worktree, "down"),
+        )?;
+        let critic_pane = parse_required_pane_id(&critic_output.stdout)?;
+        let editor_pane = if has_editor {
+            let _ = run_ok(runner, &self.pane_run_spec(&root_pane, &request.editor_cmd))?;
+            root_pane
+        } else {
+            String::new()
+        };
+        let _ = run_ok(
+            runner,
+            &self.agent_start_spec(
+                &herdr_agent_name(&request.worktree.slot, "primary"),
+                &primary_pane,
+                &request.primary_agent_cmd,
+            ),
+        )?;
+        let _ = run_ok(
+            runner,
+            &self.agent_start_spec(
+                &herdr_agent_name(&request.worktree.slot, "critic"),
+                &critic_pane,
+                &request.critic_agent_cmd,
+            ),
+        )?;
         Ok(SpawnRecord {
             worktree,
-            primary_pane: parse_pane_id(&primary_output.stdout).unwrap_or_default(),
-            critic_pane: parse_pane_id(&critic_output.stdout).unwrap_or_default(),
+            primary_pane,
+            critic_pane,
             editor_pane,
         })
     }
@@ -954,17 +1013,19 @@ impl BackendAdapter for HerdrBackend {
     fn delivery_specs(&self, target: &str, intent: &DeliveryIntent) -> Vec<CommandSpec> {
         match intent {
             DeliveryIntent::Noop { .. } => Vec::new(),
-            DeliveryIntent::SubmitQueued { text }
-            | DeliveryIntent::AnswerBlocker { response: text, .. } => {
+            DeliveryIntent::SubmitQueued { text } => {
+                vec![self.pane_run_spec(target, std::slice::from_ref(text))]
+            }
+            DeliveryIntent::AnswerBlocker { response, .. } => {
                 let mut specs = Vec::new();
-                if !text.is_empty() {
+                if !response.is_empty() {
                     specs.push(CommandSpec::from_args(
                         &self.bin,
                         vec![
-                            "agent".to_string(),
-                            "send".to_string(),
+                            "pane".to_string(),
+                            "send-text".to_string(),
                             target.to_string(),
-                            text.clone(),
+                            response.clone(),
                         ],
                     ));
                 }
@@ -1225,6 +1286,15 @@ pub fn delivery_intent(pane_text: &str, queued_prompt: &str) -> DeliveryIntent {
     }
 }
 
+fn delivery_detail(kind: BackendKind, intent: &DeliveryIntent) -> String {
+    match (kind, intent) {
+        (BackendKind::Herdr, DeliveryIntent::SubmitQueued { text }) => {
+            format!("submit {} chars with pane run", text.chars().count())
+        }
+        _ => intent.detail(),
+    }
+}
+
 pub fn delivery_plan(
     adapter: &dyn BackendAdapter,
     target: &str,
@@ -1243,20 +1313,20 @@ pub fn delivery_plan(
         operations.push(OperationPlan::read(
             &intent.action(),
             target,
-            intent.detail(),
+            delivery_detail(adapter.kind(), &intent),
             None,
         ));
     } else {
         for (index, spec) in specs.into_iter().enumerate() {
-            let action = if index == 0 && has_text_event {
-                "send-text"
-            } else {
-                "submit-enter"
+            let action = match (&intent, adapter.kind(), index, has_text_event) {
+                (DeliveryIntent::SubmitQueued { .. }, BackendKind::Herdr, 0, _) => "submit-prompt",
+                (_, _, 0, true) => "send-text",
+                _ => "submit-enter",
             };
             operations.push(OperationPlan::mutate_command(
                 action,
                 target,
-                intent.detail(),
+                delivery_detail(adapter.kind(), &intent),
                 spec,
             ));
         }
@@ -1416,6 +1486,10 @@ fn display_path(path: &std::path::Path) -> String {
     path.display().to_string()
 }
 
+fn herdr_agent_name(slot: &str, role: &str) -> String {
+    format!("{slot}-{role}")
+}
+
 fn shell_command(argv: &[String]) -> String {
     argv.join(" ")
 }
@@ -1431,21 +1505,35 @@ fn parse_tmux_window_pane(stdout: &str) -> Result<(String, String), BackendError
     ))
 }
 
-fn parse_pane_id(stdout: &str) -> Option<String> {
-    let payload = serde_json::from_str::<Value>(stdout).ok()?;
-    find_string_key(&payload, &["pane_id", "id", "terminal_id"])
+fn parse_required_pane_id(stdout: &str) -> Result<String, BackendError> {
+    let payload = serde_json::from_str::<Value>(stdout)?;
+    find_string_key(&payload, &["pane_id", "terminal_id", "id"])
+        .ok_or_else(|| BackendError::Parse("herdr pane output missing pane id".to_string()))
+}
+
+fn required_result(value: &Value) -> Result<&Value, BackendError> {
+    value
+        .get("result")
+        .ok_or_else(|| BackendError::Parse("herdr output missing result".to_string()))
 }
 
 fn find_string_key(value: &Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(value) = find_string_value(value, key) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn find_string_value(value: &Value, key: &str) -> Option<String> {
     match value {
         Value::Object(map) => {
-            for key in keys {
-                if let Some(value) = map.get(*key).and_then(Value::as_str) {
-                    return Some(value.to_string());
-                }
+            if let Some(value) = map.get(key).and_then(Value::as_str) {
+                return Some(value.to_string());
             }
             for value in map.values() {
-                if let Some(found) = find_string_key(value, keys) {
+                if let Some(found) = find_string_value(value, key) {
                     return Some(found);
                 }
             }
@@ -1453,7 +1541,7 @@ fn find_string_key(value: &Value, keys: &[&str]) -> Option<String> {
         }
         Value::Array(values) => {
             for value in values {
-                if let Some(found) = find_string_key(value, keys) {
+                if let Some(found) = find_string_value(value, key) {
                     return Some(found);
                 }
             }

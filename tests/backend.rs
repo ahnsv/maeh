@@ -213,12 +213,63 @@ fn worktree_plan_and_spawn_plan_cover_herdr_and_tmux_no_editor() {
         .contains(&"--focus".to_string()));
 
     let spawn = herdr.spawn_plan(&spawn_request(false, false, true));
+    assert_eq!(spawn.len(), 4);
+    assert_eq!(spawn[1].action, "critic-pane");
     assert_eq!(
-        spawn.iter().filter(|op| op.action == "editor-pane").count(),
-        0
+        spawn[1].command.as_ref().unwrap().argv(),
+        [
+            "herdrx",
+            "pane",
+            "split",
+            "--pane",
+            "$root_pane",
+            "--direction",
+            "down",
+            "--cwd",
+            "/repo/.worktrees/live",
+            "--no-focus"
+        ]
     );
-    assert!(spawn.iter().any(|op| op.action == "primary-agent"));
-    assert!(spawn.iter().any(|op| op.action == "critic-agent"));
+    assert_eq!(
+        spawn[2].command.as_ref().unwrap().argv(),
+        [
+            "herdrx",
+            "agent",
+            "start",
+            "slot-a-primary",
+            "--kind",
+            "codex",
+            "--pane",
+            "$root_pane",
+            "--",
+            "--primary"
+        ]
+    );
+    assert_eq!(
+        spawn[3].command.as_ref().unwrap().argv(),
+        [
+            "herdrx",
+            "agent",
+            "start",
+            "slot-a-critic",
+            "--kind",
+            "codex",
+            "--pane",
+            "$critic_pane",
+            "--",
+            "--critic"
+        ]
+    );
+    let mut second_request = spawn_request(false, false, true);
+    second_request.worktree.slot = "slot-b".to_string();
+    assert_eq!(
+        herdr.spawn_plan(&second_request)[2]
+            .command
+            .as_ref()
+            .unwrap()
+            .argv()[3],
+        "slot-b-primary"
+    );
 
     let tmux_spawn = tmux().spawn_plan(&spawn_request(false, false, true));
     assert_eq!(tmux_spawn[0].command.as_ref().unwrap().program, "git");
@@ -348,13 +399,33 @@ fn herdr_editor_empty_path_and_error_paths_are_deterministic() {
 
     let editor_spawn = spawn_request(true, false, true);
     let editor_plan = adapter.spawn_plan(&editor_spawn);
-    assert!(editor_plan.iter().any(|op| op.action == "editor-pane"));
+    assert_eq!(editor_plan[1].action, "primary-pane");
+    assert_eq!(editor_plan[2].action, "critic-pane");
+    assert_eq!(editor_plan[3].action, "editor-pane");
+    assert_eq!(
+        editor_plan[3].command.as_ref().unwrap().argv(),
+        ["herdrx", "pane", "run", "$root_pane", "vi"]
+    );
     let mut runner = FakeRunner {
         outputs: vec![
-            output(r#"{"result":{"workspace_id":"w9"}}"#),
-            output(r#"{"result":{"pane_id":"w9:p1"}}"#),
-            output(r#"{"result":{"id":"w9:p2"}}"#),
-            output(r#"{"result":{"terminal_id":"w9:p3"}}"#),
+            output(
+                r#"{"id":"cli:worktree:create","result":{"type":"worktree_created","workspace":{"workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1"},"worktree":{"path":"/repo/.worktrees/live"}}}"#,
+            ),
+            output(
+                r#"{"id":"cli:pane:split","result":{"type":"pane_info","pane":{"pane_id":"w9:p2","terminal_id":"term2"}}}"#,
+            ),
+            output(
+                r#"{"id":"cli:pane:split","result":{"type":"pane_info","pane":{"pane_id":"w9:p3","terminal_id":"term3"}}}"#,
+            ),
+            output(
+                r#"{"id":"cli:pane:run","result":{"type":"pane_info","pane":{"pane_id":"w9:p1"}}}"#,
+            ),
+            output(
+                r#"{"id":"cli:agent:start","result":{"type":"agent_started","agent":{"pane_id":"w9:p2"}}}"#,
+            ),
+            output(
+                r#"{"id":"cli:agent:start","result":{"type":"agent_started","agent":{"pane_id":"w9:p3"}}}"#,
+            ),
         ],
         specs: Vec::new(),
     };
@@ -363,28 +434,39 @@ fn herdr_editor_empty_path_and_error_paths_are_deterministic() {
     assert_eq!(spawn.primary_pane, "w9:p2");
     assert_eq!(spawn.critic_pane, "w9:p3");
     assert_eq!(spawn.worktree.worktree, "/repo/.worktrees/live");
+    assert_eq!(
+        runner.specs[4].argv(),
+        [
+            "herdrx",
+            "agent",
+            "start",
+            "slot-a-primary",
+            "--kind",
+            "codex",
+            "--pane",
+            "w9:p2",
+            "--",
+            "--primary"
+        ]
+    );
 
-    let mut array_id = FakeRunner {
-        outputs: vec![output(r#"[{"workspace_id":"w-array","path":"/array-wt"}]"#)],
-        specs: Vec::new(),
-    };
-    let array_record = adapter
-        .execute_worktree(&mut array_id, &worktree_request(false, false, true))
-        .unwrap();
-    assert_eq!(array_record.workspace_id, "w-array");
     let mut missing_id = FakeRunner {
-        outputs: vec![output(r#"{"result":{"path":"/tmp/wt"}}"#)],
+        outputs: vec![output(
+            r#"{"result":{"type":"worktree_created","root_pane":{"pane_id":"p1"},"worktree":{"path":"/tmp/wt"}}}"#,
+        )],
         specs: Vec::new(),
     };
     assert!(adapter
         .execute_worktree(&mut missing_id, &worktree_request(false, false, true))
         .is_err());
-    let mut array_missing_id = FakeRunner {
-        outputs: vec![output(r#"[{"path":"/tmp/wt"}]"#)],
+    let mut missing_root = FakeRunner {
+        outputs: vec![output(
+            r#"{"result":{"type":"worktree_created","workspace":{"workspace_id":"w"},"worktree":{"path":"/tmp/wt"}}}"#,
+        )],
         specs: Vec::new(),
     };
     assert!(adapter
-        .execute_worktree(&mut array_missing_id, &worktree_request(false, false, true))
+        .execute_worktree(&mut missing_root, &worktree_request(false, false, true))
         .is_err());
     let mut primitive = FakeRunner {
         outputs: vec![output("7")],
@@ -407,7 +489,7 @@ fn execute_worktree_and_spawn_persist_real_backend_ids() {
     let herdr = HerdrBackend::new("herdrx".to_string());
     let mut runner = FakeRunner {
         outputs: vec![output(
-            r#"{"result":{"workspace_id":"w9","path":"/repo/.worktrees/live"}}"#,
+            r#"{"id":"cli:worktree:create","result":{"type":"worktree_created","workspace":{"workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1"},"worktree":{"path":"/repo/.worktrees/live"}}}"#,
         )],
         specs: Vec::new(),
     };
@@ -420,18 +502,42 @@ fn execute_worktree_and_spawn_persist_real_backend_ids() {
 
     let mut runner = FakeRunner {
         outputs: vec![
-            output(r#"{"result":{"workspace_id":"w9","path":"/repo/.worktrees/live"}}"#),
-            output(r#"{"result":{"pane_id":"w9:p2"}}"#),
-            output(r#"{"result":{"pane_id":"w9:p3"}}"#),
+            output(
+                r#"{"id":"cli:worktree:create","result":{"type":"worktree_created","workspace":{"workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1"},"worktree":{"path":"/repo/.worktrees/live"}}}"#,
+            ),
+            output(
+                r#"{"id":"cli:pane:split","result":{"type":"pane_info","pane":{"pane_id":"w9:p3"}}}"#,
+            ),
+            output(
+                r#"{"id":"cli:agent:start","result":{"type":"agent_started","agent":{"pane_id":"w9:p1"}}}"#,
+            ),
+            output(
+                r#"{"id":"cli:agent:start","result":{"type":"agent_started","agent":{"pane_id":"w9:p3"}}}"#,
+            ),
         ],
         specs: Vec::new(),
     };
     let spawn = herdr
         .execute_spawn(&mut runner, &spawn_request(false, false, true))
         .unwrap();
-    assert_eq!(spawn.primary_pane, "w9:p2");
+    assert_eq!(spawn.primary_pane, "w9:p1");
     assert_eq!(spawn.critic_pane, "w9:p3");
     assert_eq!(spawn.editor_pane, "");
+    assert_eq!(
+        runner.specs[1].argv(),
+        [
+            "herdrx",
+            "pane",
+            "split",
+            "--pane",
+            "w9:p1",
+            "--direction",
+            "down",
+            "--cwd",
+            "/repo/.worktrees/live",
+            "--no-focus"
+        ]
+    );
 
     let mut tmux_runner = FakeRunner {
         outputs: vec![output(""), output("@9\t%1\n"), output("%3\n")],
@@ -535,16 +641,11 @@ fn prompt_delivery_policy_and_adapter_commands_are_explicit_text_plus_enter() {
 
     let herdr = HerdrBackend::new("herdrx".to_string());
     let operations = delivery_plan(&herdr, "w1:p2", "ready\n› ", prompt);
-    assert_eq!(operations.len(), 2);
-    assert_eq!(operations[0].action, "send-text");
+    assert_eq!(operations.len(), 1);
+    assert_eq!(operations[0].action, "submit-prompt");
     assert_eq!(
         operations[0].command.as_ref().unwrap().argv(),
-        ["herdrx", "agent", "send", "w1:p2", "Do the task"]
-    );
-    assert_eq!(operations[1].action, "submit-enter");
-    assert_eq!(
-        operations[1].command.as_ref().unwrap().argv(),
-        ["herdrx", "pane", "send-keys", "w1:p2", "Enter"]
+        ["herdrx", "pane", "run", "w1:p2", "Do the task"]
     );
 
     let tmux_operations = delivery_plan(&tmux(), "%1", "ready\n> ", prompt);
@@ -560,6 +661,12 @@ fn prompt_delivery_policy_and_adapter_commands_are_explicit_text_plus_enter() {
     assert_eq!(
         tmux_trust[0].command.as_ref().unwrap().argv(),
         ["tmuxx", "send-keys", "-t", "%1", "-l", "1"]
+    );
+
+    let herdr_trust = delivery_plan(&herdr, "w1:p2", "Trust this folder", prompt);
+    assert_eq!(
+        herdr_trust[0].command.as_ref().unwrap().argv(),
+        ["herdrx", "pane", "send-text", "w1:p2", "1"]
     );
 
     let continue_ops = delivery_plan(&herdr, "w1:p2", "Press Enter to continue", prompt);

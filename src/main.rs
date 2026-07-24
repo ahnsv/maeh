@@ -747,7 +747,7 @@ fn print_command_help(command: &str) -> bool {
                     "List, inspect, classify, spawn, and mutate managed slot lifecycle state.",
                     "This is the primary operator surface for cleanup, revamp, and active work management.",
                 ],
-                &["maeh slot <spawn|verify|close|list|inspect|classify|snooze|block|resume|nudge|remove-worktree|worktree-remove|count> [OPTIONS]"],
+                &["maeh slot <spawn|verify|close|list|inspect|classify|snooze|block|resume|review|nudge|remove-worktree|worktree-remove|count> [OPTIONS]"],
                 &[
                     ("spawn", "plan or execute a managed workspace plus agents"),
                     ("verify", "verify required local slot metadata"),
@@ -758,6 +758,7 @@ fn print_command_help(command: &str) -> bool {
                     ("snooze", "mark a slot snoozed or another requested status"),
                     ("block", "mark a slot blocked with optional reason"),
                     ("resume", "mark a slot active and clear snooze/block fields"),
+                    ("review", "mark a slot ready for review"),
                     ("nudge", "record a nudge or deliver a prompt to a slot role"),
                     ("remove-worktree", "plan or execute git worktree removal"),
                     ("worktree-remove", "alias for remove-worktree"),
@@ -1295,6 +1296,10 @@ fn slot_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
         "resume" => {
             let slot = slot_arg(args)?;
             slot_mark(home, &slot, "active", args)
+        }
+        "review" => {
+            let slot = slot_arg(args)?;
+            slot_mark(home, &slot, "review", args)
         }
         "nudge" => slot_nudge(home, args),
         "remove-worktree" | "worktree-remove" => slot_worktree_remove(home, args),
