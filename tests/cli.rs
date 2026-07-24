@@ -90,6 +90,26 @@ fn help_version_and_command_help_cover_existing_commands() {
         .assert()
         .success()
         .stdout(format!("maeh {}\n", env!("CARGO_PKG_VERSION")));
+    let temp = TempDir::new().unwrap();
+    maeh().arg("--home").arg(temp.path()).assert().success();
+    maeh()
+        .arg("--home")
+        .arg(temp.path())
+        .arg("--help")
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(temp.path())
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(format!("maeh {}\n", env!("CARGO_PKG_VERSION")));
+    maeh()
+        .args(["wat", "--help"])
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: unknown command wat\n");
 
     let output = maeh().arg("--help").output().unwrap();
     assert!(output.status.success());
