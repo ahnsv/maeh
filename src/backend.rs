@@ -1487,7 +1487,23 @@ fn display_path(path: &std::path::Path) -> String {
 }
 
 fn herdr_agent_name(slot: &str, role: &str) -> String {
-    format!("{slot}-{role}")
+    let slug = slot
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if slug.is_empty() {
+        role.to_string()
+    } else {
+        format!("{slug}-{role}")
+    }
 }
 
 fn shell_command(argv: &[String]) -> String {
