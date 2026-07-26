@@ -271,6 +271,23 @@ fn worktree_plan_and_spawn_plan_cover_herdr_and_tmux_no_editor() {
         "slot-b-primary"
     );
 
+    let mut empty_agent_cmd = spawn_request(false, false, true);
+    empty_agent_cmd.primary_agent_cmd = Vec::new();
+    let empty_plan = herdr.spawn_plan(&empty_agent_cmd);
+    assert_eq!(
+        empty_plan[2].command.as_ref().unwrap().argv(),
+        [
+            "herdrx",
+            "agent",
+            "start",
+            "slot-a-primary",
+            "--kind",
+            "slot-a-primary",
+            "--pane",
+            "$root_pane"
+        ]
+    );
+
     let tmux_spawn = tmux().spawn_plan(&spawn_request(false, false, true));
     assert_eq!(tmux_spawn[0].command.as_ref().unwrap().program, "git");
     assert!(tmux_spawn.iter().any(|op| op.action == "primary-agent"));
@@ -468,6 +485,18 @@ fn herdr_editor_empty_path_and_error_paths_are_deterministic() {
     assert!(adapter
         .execute_worktree(&mut missing_root, &worktree_request(false, false, true))
         .is_err());
+    let mut missing_path = FakeRunner {
+        outputs: vec![output(
+            r#"{"result":{"type":"worktree_created","workspace":{"workspace_id":"w"},"root_pane":{"pane_id":"p1"},"worktree":{}}}"#,
+        )],
+        specs: Vec::new(),
+    };
+    let error = adapter
+        .execute_worktree(&mut missing_path, &worktree_request(false, false, true))
+        .unwrap_err();
+    assert!(
+        matches!(error, BackendError::Parse(message) if message == "herdr worktree output missing path")
+    );
     let mut primitive = FakeRunner {
         outputs: vec![output("7")],
         specs: Vec::new(),
@@ -552,6 +581,117 @@ fn execute_worktree_and_spawn_persist_real_backend_ids() {
     assert_eq!(tmux_runner.specs[0].program, "git");
     assert_eq!(tmux_runner.specs[1].args[0], "new-window");
     assert_eq!(tmux_runner.specs[2].args[0], "split-window");
+}
+
+#[test]
+fn herdr_spawn_stops_on_each_command_failure_boundary() {
+    let adapter = HerdrBackend::new("herdrx".to_string());
+    let worktree = output(
+        r#"{"id":"cli:worktree:create","result":{"type":"worktree_created","workspace":{"workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1"},"worktree":{"path":"/repo/.worktrees/live"}}}"#,
+    );
+    let split = output(
+        r#"{"id":"cli:pane:split","result":{"type":"pane_info","pane":{"pane_id":"w9:p3"}}}"#,
+    );
+    let agent = output(
+        r#"{"id":"cli:agent:start","result":{"type":"agent_started","agent":{"pane_id":"w9:p1"}}}"#,
+    );
+
+    let mut editor_primary_split = FakeRunner {
+        outputs: vec![worktree.clone(), failing_output()],
+        specs: Vec::new(),
+    };
+    let error = adapter
+        .execute_spawn(&mut editor_primary_split, &spawn_request(true, false, true))
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        BackendError::CommandFailed {
+            program,
+            status: 9
+        } if program == "herdrx"
+    ));
+    assert_eq!(editor_primary_split.specs.len(), 2);
+    assert_eq!(editor_primary_split.specs[1].args[5], "right");
+
+    let mut critic_split = FakeRunner {
+        outputs: vec![worktree.clone(), failing_output()],
+        specs: Vec::new(),
+    };
+    assert!(adapter
+        .execute_spawn(&mut critic_split, &spawn_request(false, false, true))
+        .is_err());
+    assert_eq!(critic_split.specs.len(), 2);
+    assert_eq!(critic_split.specs[1].args[5], "down");
+    assert!(critic_split
+        .specs
+        .iter()
+        .all(|spec| !spec.args.windows(2).any(|pair| pair == ["agent", "start"])));
+
+    let mut primary_start = FakeRunner {
+        outputs: vec![worktree.clone(), split.clone(), failing_output()],
+        specs: Vec::new(),
+    };
+    assert!(adapter
+        .execute_spawn(&mut primary_start, &spawn_request(false, false, true))
+        .is_err());
+    assert_eq!(primary_start.specs.len(), 3);
+    assert_eq!(primary_start.specs[2].args[2], "slot-a-primary");
+    assert!(primary_start
+        .specs
+        .iter()
+        .all(|spec| !spec.args.contains(&"slot-a-critic".to_string())));
+
+    let mut critic_start = FakeRunner {
+        outputs: vec![worktree, split, agent, failing_output()],
+        specs: Vec::new(),
+    };
+    assert!(adapter
+        .execute_spawn(&mut critic_start, &spawn_request(false, false, true))
+        .is_err());
+    assert_eq!(critic_start.specs.len(), 4);
+    assert_eq!(critic_start.specs[3].args[2], "slot-a-critic");
+}
+
+#[test]
+fn herdr_pane_id_parser_recurses_arrays_and_reports_array_miss() {
+    let adapter = HerdrBackend::new("herdrx".to_string());
+    let mut nested_array = FakeRunner {
+        outputs: vec![
+            output(
+                r#"{"id":"cli:worktree:create","result":{"type":"worktree_created","workspace":{"workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1"},"worktree":{"path":"/repo/.worktrees/live"}}}"#,
+            ),
+            output(r#"{"result":{"type":"pane_info","pane":[{"pane_id":"w9:p-array"}]}}"#),
+            output(
+                r#"{"id":"cli:agent:start","result":{"type":"agent_started","agent":{"pane_id":"w9:p1"}}}"#,
+            ),
+            output(
+                r#"{"id":"cli:agent:start","result":{"type":"agent_started","agent":{"pane_id":"w9:p-array"}}}"#,
+            ),
+        ],
+        specs: Vec::new(),
+    };
+    let spawn = adapter
+        .execute_spawn(&mut nested_array, &spawn_request(false, false, true))
+        .unwrap();
+    assert_eq!(spawn.critic_pane, "w9:p-array");
+    assert_eq!(nested_array.specs[3].args[6], "w9:p-array");
+
+    let mut array_miss = FakeRunner {
+        outputs: vec![
+            output(
+                r#"{"id":"cli:worktree:create","result":{"type":"worktree_created","workspace":{"workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1"},"worktree":{"path":"/repo/.worktrees/live"}}}"#,
+            ),
+            output(r#"{"result":{"type":"pane_info","pane":[{"label":"no pane id"}]}}"#),
+        ],
+        specs: Vec::new(),
+    };
+    let error = adapter
+        .execute_spawn(&mut array_miss, &spawn_request(false, false, true))
+        .unwrap_err();
+    assert!(
+        matches!(error, BackendError::Parse(message) if message == "herdr pane output missing pane id")
+    );
+    assert_eq!(array_miss.specs.len(), 2);
 }
 
 #[test]
