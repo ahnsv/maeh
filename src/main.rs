@@ -40,6 +40,38 @@ enum MaehError {
 type Result<T> = std::result::Result<T, MaehError>;
 type State = BTreeMap<String, BTreeMap<String, String>>;
 
+const COMMANDS: &[(&str, &str)] = &[
+    ("init", "create local state directories and config"),
+    ("config", "inspect paths, effective config, and env exports"),
+    ("ledger", "append or list orchestration JSONL spans"),
+    ("state", "read and mutate local slot metadata"),
+    ("board-cache", "store and read tracker board snapshots"),
+    ("capsule", "store and render compact task context"),
+    ("prompt", "render reusable agent prompts"),
+    ("backend", "inspect and reconcile Herdr/tmux backend state"),
+    ("worktree", "plan or open backend worktrees/workspaces"),
+    ("workspace", "register or spawn managed backend workspaces"),
+    (
+        "spawn",
+        "plan or launch a worktree plus primary/critic agents",
+    ),
+    ("agent", "deliver prompts through backend adapters"),
+    ("kickoff", "plan or run queued prompt delivery"),
+    ("verify", "verify prompt or slot execution evidence"),
+    ("slot", "list, inspect, classify, and mutate managed slots"),
+    ("cleanup", "cleanup-oriented wrappers for done slots"),
+    (
+        "revamp",
+        "stale-work wrappers for resume/snooze/block/nudge",
+    ),
+    ("status", "backend-aware slot and worktree reports"),
+    ("cap", "check configured work/review caps"),
+    ("statusline", "print compact pool status"),
+    ("work-hours", "evaluate configured work-hour guard"),
+    ("doctor", "debug paths, config, backend, and env"),
+    ("selftest", "validate config/state readability"),
+];
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 struct Config {
@@ -98,11 +130,16 @@ fn run(args: Vec<OsString>) -> Result<()> {
         .into_iter()
         .map(|arg| arg.to_string_lossy().to_string())
         .collect::<Vec<_>>();
-    if args
-        .first()
-        .is_some_and(|arg| arg == "--help" || arg == "-h")
-    {
+    if args.is_empty() {
+        print_concise_help();
+        return Ok(());
+    }
+    if args.first().is_some_and(|arg| is_help_arg(arg)) {
         print_help();
+        return Ok(());
+    }
+    if args.first().is_some_and(|arg| is_version_arg(arg)) {
+        print_version();
         return Ok(());
     }
     let home = if args.first().is_some_and(|arg| arg == "--home") {
@@ -111,11 +148,29 @@ fn run(args: Vec<OsString>) -> Result<()> {
     } else {
         resolve_home()
     };
+    if args.is_empty() {
+        print_concise_help();
+        return Ok(());
+    }
+    if args.first().is_some_and(|arg| is_help_arg(arg)) {
+        print_help();
+        return Ok(());
+    }
+    if args.first().is_some_and(|arg| is_version_arg(arg)) {
+        print_version();
+        return Ok(());
+    }
     dispatch(&home, &mut args)
 }
 
 fn dispatch(home: &Path, args: &mut Vec<String>) -> Result<()> {
     let command = take_arg(args, "command")?;
+    if has_help_arg(args) {
+        if print_command_help(&command) {
+            return Ok(());
+        }
+        return Err(MaehError::Usage(format!("unknown command {command}")));
+    }
     match command.as_str() {
         "init" => init(home),
         "config" => config_command(home, args),
@@ -144,40 +199,785 @@ fn dispatch(home: &Path, args: &mut Vec<String>) -> Result<()> {
     }
 }
 
-fn print_help() {
+fn is_help_arg(arg: &str) -> bool {
+    matches!(arg, "--help" | "-h")
+}
+
+fn is_version_arg(arg: &str) -> bool {
+    matches!(arg, "--version" | "-V")
+}
+
+fn has_help_arg(args: &[String]) -> bool {
+    args.iter().any(|arg| is_help_arg(arg))
+}
+
+fn print_version() {
+    println!("maeh {}", env!("CARGO_PKG_VERSION"));
+}
+
+fn print_concise_help() {
     println!("Typed orchestration CLI for hmph and Herdr agents");
     println!();
     println!("Usage: maeh [--home PATH] <command>");
     println!();
-    println!("Commands:");
-    println!("  init          create local state directories and config");
-    println!("  config        path, show, or emit config");
-    println!("  ledger        append or list JSONL spans");
-    println!("  state         tag, untag, get, list, worktree, delete-slot");
-    println!("  board-cache   put or get tracker board snapshots");
-    println!("  capsule       put, get, or prompt compact task context");
-    println!("  prompt        render kickoff prompts");
-    println!("  backend       plan or dry-run backend discovery/reconciliation");
-    println!("  worktree      plan or open backend worktrees/workspaces");
-    println!("  workspace     register or spawn backend workspaces");
-    println!("  spawn         plan or run worktree plus primary/critic agents");
-    println!("  agent         deliver prompts through backend adapters");
-    println!("  kickoff       plan or deliver queued prompts to agent panes");
-    println!("  verify        verify prompt or slot execution evidence");
-    println!("  slot          list, inspect, classify, or mutate managed slots");
-    println!("  cleanup       cleanup-oriented slot wrappers");
-    println!("  revamp        revamp-oriented stale slot wrappers");
-    println!("  status        backend-aware slot status reports");
-    println!("  cap           check configured work/review caps");
-    println!("  statusline    print compact pool status");
-    println!("  work-hours    evaluate configured work-hour guard");
-    println!("  doctor        debug paths, config, backend, and env");
-    println!("  selftest      validate local config/state readability");
+    println!("Examples:");
+    println!("  maeh init");
+    println!("  maeh doctor");
+    println!();
+    println!(
+        "Run `maeh --help` for the full command list and `maeh <command> --help` for details."
+    );
 }
 
-fn print_state_help() {
-    println!("Manage local slot state");
-    println!("Usage: maeh state <tag|untag|get|list|worktree|delete-slot>");
+fn print_help() {
+    println!("Typed orchestration CLI for hmph and Herdr agents");
+    println!();
+    println!("Usage:");
+    println!("  maeh [GLOBAL OPTIONS] <command> [ARGS]");
+    println!("  maeh <command> --help");
+    println!();
+    println!("Examples:");
+    println!("  maeh init");
+    println!("  maeh backend list-task-slots");
+    println!("  maeh prompt kickoff --url <task-url>");
+    println!("  maeh doctor");
+    println!();
+    println!("Global options:");
+    println!("  -h, --help       print help");
+    println!("  -V, --version    print version");
+    println!("  --home PATH      use alternate state directory (defaults to MAEH_HOME or ~/.maeh)");
+    println!();
+    println!("Commands:");
+    print_command_rows(COMMANDS);
+    println!();
+    println!("Notes:");
+    println!("  Outputs are stable, line-oriented, and safe for humans and agents to parse.");
+    println!("  Prefer plan/list/inspect commands; live backend mutations require --exec.");
+    println!("  Success output goes to stdout; errors and diagnostics go to stderr.");
+    println!("  Run `maeh <command> --help` for command-specific usage, options, and examples.");
+}
+
+fn print_command_rows(rows: &[(&str, &str)]) {
+    for (name, description) in rows {
+        println!("  {name:<13} {description}");
+    }
+}
+
+fn print_rows(rows: &[(&str, &str)]) {
+    for (name, description) in rows {
+        println!("  {name:<28} {description}");
+    }
+}
+
+fn print_lines(lines: &[&str]) {
+    for line in lines {
+        println!("  {line}");
+    }
+}
+
+fn print_help_page(
+    title: &str,
+    description: &[&str],
+    usage: &[&str],
+    actions: &[(&str, &str)],
+    options: &[(&str, &str)],
+    examples: &[&str],
+    notes: &[&str],
+) {
+    println!("{title}");
+    if !description.is_empty() {
+        println!();
+        println!("Description:");
+        print_lines(description);
+    }
+    println!();
+    println!("Usage:");
+    print_lines(usage);
+    if !actions.is_empty() {
+        println!();
+        println!("Subcommands:");
+        print_rows(actions);
+    }
+    if !options.is_empty() {
+        println!();
+        println!("Options:");
+        print_rows(options);
+    }
+    if !examples.is_empty() {
+        println!();
+        println!("Examples:");
+        print_lines(examples);
+    }
+    if !notes.is_empty() {
+        println!();
+        println!("Notes:");
+        print_lines(notes);
+    }
+}
+
+fn print_command_help(command: &str) -> bool {
+    match command {
+        "init" => {
+            print_help_page(
+                "maeh init",
+                &[
+                    "Create the maeh home directory layout and default config.toml.",
+                    "Safe to rerun; existing config is left unchanged.",
+                ],
+                &["maeh init"],
+                &[],
+                &[],
+                &["maeh init", "MAEH_HOME=/tmp/maeh maeh init"],
+                &[
+                    "Creates ledger, board-cache, and task-capsules directories.",
+                    "Uses MAEH_HOME, HOME/.maeh, or --home PATH for the state root.",
+                ],
+            );
+            true
+        }
+        "config" => {
+            print_help_page(
+                "maeh config",
+                &[
+                    "Inspect maeh configuration and export effective values for shell helpers.",
+                    "show and emit apply supported MAEH_* environment overrides before printing.",
+                ],
+                &["maeh config <path|show|emit>"],
+                &[
+                    ("path", "print the config.toml path for the active home"),
+                    ("show", "print the effective human-readable config"),
+                    ("emit", "print shell-friendly MAEH_* key/value lines"),
+                ],
+                &[],
+                &["maeh config path", "maeh config show", "maeh config emit"],
+                &[
+                    "Config defaults are built in; maeh can run before init creates config.toml.",
+                    "Backend and harness env vars override values read from config.toml.",
+                ],
+            );
+            true
+        }
+        "ledger" => {
+            print_help_page(
+                "maeh ledger",
+                &[
+                    "Append and list orchestration span events stored as JSONL under MAEH_HOME.",
+                    "Use this for loop bookkeeping, queued work, and handoff breadcrumbs.",
+                ],
+                &["maeh ledger <append|list> [OPTIONS]"],
+                &[
+                    (
+                        "append",
+                        "append one span row to <home>/ledger/<loop>.jsonl",
+                    ),
+                    ("list", "print rows from a loop ledger file"),
+                ],
+                &[
+                    ("--loop NAME", "ledger name; also the JSONL filename stem"),
+                    ("--event NAME", "event name for append"),
+                    ("--target VALUE", "slot, task, or object the event concerns"),
+                    ("--data JSON", "JSON payload for append; defaults to {}"),
+                ],
+                &[
+                    "maeh ledger append --loop daily --event run_start --target w1 --data '{}'",
+                    "maeh ledger list --loop daily",
+                ],
+                &[
+                    "append creates the ledger directory if needed.",
+                    "list prints timestamp, event, target, and JSON payload per row.",
+                ],
+            );
+            true
+        }
+        "state" => {
+            print_help_page(
+                "maeh state",
+                &[
+                    "Read and mutate local slot metadata in <home>/state.json.",
+                    "Slots are lightweight records used by backend, cleanup, revamp, and status commands.",
+                ],
+                &["maeh state <tag|untag|get|list|worktree|delete-slot> [ARGS]"],
+                &[
+                    ("tag", "set a key/value on a slot: tag <slot> <key> <value>"),
+                    ("untag", "remove one key from a slot: untag <slot> <key>"),
+                    ("get", "print one slot value: get <slot> <key>"),
+                    ("list", "print tab-separated slot summary rows"),
+                    ("worktree", "shortcut for get <slot> worktree"),
+                    ("delete-slot", "remove the local slot record"),
+                ],
+                &[],
+                &[
+                    "maeh state tag w1 task_url https://example/task",
+                    "maeh state get w1 task_url",
+                    "maeh state list",
+                ],
+                &[
+                    "This mutates only local maeh state; it does not close backend windows.",
+                    "Use maeh slot close --exec when backend cleanup should happen too.",
+                ],
+            );
+            true
+        }
+        "board-cache" => {
+            print_help_page(
+                "maeh board-cache",
+                &[
+                    "Cache tracker board snapshots so loops can avoid expensive repeated reads.",
+                    "Input and output are raw JSON values.",
+                ],
+                &["maeh board-cache <put|get> [OPTIONS]"],
+                &[
+                    ("put", "read JSON from stdin and store it under a cache key"),
+                    ("get", "print cached JSON when it exists and is fresh"),
+                ],
+                &[
+                    ("--key NAME", "cache key; defaults to intake"),
+                    ("--stale", "allow get to return expired cache content"),
+                ],
+                &[
+                    "maeh board-cache put --key intake < board.json",
+                    "maeh board-cache get --key intake",
+                    "maeh board-cache get --key revamp --stale",
+                ],
+                &[
+                    "The revamp key uses board_ttl_revamp_secs; all others use board_ttl_intake_secs.",
+                    "Expired cache reads fail with a cache miss unless --stale is passed.",
+                ],
+            );
+            true
+        }
+        "capsule" => {
+            print_help_page(
+                "maeh capsule",
+                &[
+                    "Store compact task context keyed by task URL.",
+                    "Capsules keep agent prompts small and avoid repeatedly fetching full tracker pages.",
+                ],
+                &["maeh capsule <put|get|prompt> <url> [OPTIONS]"],
+                &[
+                    ("put", "read JSON from stdin and cache it for a task URL"),
+                    ("get", "print cached capsule JSON"),
+                    ("prompt", "render cached capsule inside a Task capsule prompt block"),
+                ],
+                &[("--edited VALUE", "source last-edited marker; get/prompt require it to match when provided")],
+                &[
+                    "maeh capsule put https://task --edited 2025-01-01T00:00:00Z < capsule.json",
+                    "maeh capsule get https://task",
+                    "maeh capsule prompt https://task",
+                ],
+                &[
+                    "put enforces task_capsule_max_chars from config.",
+                    "A missing or stale capsule exits as a cache miss.",
+                ],
+            );
+            true
+        }
+        "prompt" => {
+            print_help_page(
+                "maeh prompt",
+                &[
+                    "Render reusable prompts for agent orchestration.",
+                    "Current output is plain text intended to paste into a primary agent pane.",
+                ],
+                &["maeh prompt <kickoff> [OPTIONS]"],
+                &[("kickoff", "render the standard kickoff prompt for a tracker task")],
+                &[
+                    ("--url URL", "task URL to include in the prompt"),
+                    ("--capsule-file PATH", "read task capsule JSON from a file instead of using {}"),
+                ],
+                &[
+                    "maeh prompt kickoff --url https://example/task",
+                    "maeh prompt kickoff --url https://example/task --capsule-file capsule.json",
+                ],
+                &[
+                    "This command only renders text; delivery is handled by kickoff or agent deliver.",
+                ],
+            );
+            true
+        }
+        "backend" => {
+            print_help_page(
+                "maeh backend",
+                &[
+                    "Inspect and reconcile live Herdr/tmux backend state with local maeh slot state.",
+                    "Dry-run plans are the default; live reads require --exec unless a fixture is supplied.",
+                ],
+                &["maeh backend <plan|discover|reconcile|list-task-slots|list-worktrees> [OPTIONS]"],
+                &[
+                    ("plan", "print the backend discovery command without running it"),
+                    ("discover", "read backend state and print normalized slot rows"),
+                    ("reconcile", "compare backend state with local state and print operations"),
+                    ("list-task-slots", "print task-oriented slot rows"),
+                    ("list-worktrees", "print locally tracked worktree rows"),
+                ],
+                &[
+                    ("--fixture PATH", "parse adapter output from a fixture file"),
+                    ("--exec", "perform the live backend read"),
+                ],
+                &[
+                    "maeh backend plan",
+                    "maeh backend discover --fixture tmux.fixture",
+                    "maeh backend reconcile --exec",
+                    "maeh backend list-task-slots",
+                ],
+                &[
+                    "--fixture and --exec are mutually exclusive.",
+                    "Selected backend resolves from config, env, and auto-detection.",
+                ],
+            );
+            true
+        }
+        "worktree" => {
+            print_help_page(
+                "maeh worktree",
+                &[
+                    "Plan or open a backend worktree/workspace without starting agents.",
+                    "Use spawn when the primary and critic panes should be launched too.",
+                ],
+                &["maeh worktree <plan|open> --slot SLOT --repo PATH --path PATH [OPTIONS]"],
+                &[
+                    ("plan", "print backend operations without mutating anything"),
+                    ("open", "execute worktree/workspace creation and persist local state"),
+                ],
+                &[
+                    ("--slot SLOT", "managed slot id"),
+                    ("--repo PATH", "source repository root"),
+                    ("--branch NAME", "branch name for the worktree"),
+                    ("--base REF", "base ref; defaults to HEAD"),
+                    ("--path PATH", "worktree checkout path"),
+                    ("--label NAME", "display label; defaults to slot"),
+                    ("--create", "create the worktree when the backend supports it"),
+                    ("--with-editor/--no-editor", "include or skip the editor pane in layout planning"),
+                    ("--focus/--no-focus", "request backend focus behavior"),
+                ],
+                &[
+                    "maeh worktree plan --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor",
+                    "maeh worktree open --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create",
+                ],
+                &[
+                    "open mutates the backend and local state; plan is read-only.",
+                    "Layout flags are passed through to the selected backend adapter.",
+                ],
+            );
+            true
+        }
+        "workspace" => {
+            print_help_page(
+                "maeh workspace",
+                &[
+                    "Register an existing backend workspace or spawn a full managed slot.",
+                    "workspace spawn is a compatibility wrapper around slot spawn defaults.",
+                ],
+                &["maeh workspace <register|spawn> [OPTIONS]"],
+                &[
+                    ("register", "persist an existing workspace, panes, worktree, and metadata"),
+                    ("spawn", "plan or execute a managed workspace plus agent spawn"),
+                ],
+                &[
+                    ("--slot SLOT", "managed slot id"),
+                    ("--workspace ID", "backend workspace/window id for register"),
+                    ("--worktree PATH", "worktree path for register; alias for --path in spawn"),
+                    ("--repo PATH", "repository path to persist"),
+                    ("--task-url URL", "tracker task URL"),
+                    ("--primary-pane ID", "primary agent pane id for register"),
+                    ("--critic-pane ID", "critic agent pane id for register"),
+                    ("--editor-pane ID", "editor pane id for register"),
+                    ("--backend KIND", "auto, herdr, or tmux"),
+                    ("--status VALUE", "initial local status for register; defaults to active"),
+                    ("--exec", "execute spawn instead of printing the plan"),
+                ],
+                &[
+                    "maeh workspace register --slot w1 --workspace ws1 --worktree /tmp/wt --repo /repo",
+                    "maeh workspace spawn --slot w1 --repo /repo --path /tmp/wt --task-url https://task --exec",
+                ],
+                &[
+                    "register mutates only local maeh state.",
+                    "spawn accepts the same worktree, layout, and agent command flags as slot spawn.",
+                ],
+            );
+            true
+        }
+        "spawn" => {
+            print_help_page(
+                "maeh spawn",
+                &[
+                    "Plan or run full slot setup: backend worktree plus primary and critic agents.",
+                    "This is the direct lower-level form used by slot spawn and workspace spawn wrappers.",
+                ],
+                &["maeh spawn <plan|run> --slot SLOT --task-url URL --repo PATH --path PATH [OPTIONS]"],
+                &[
+                    ("plan", "print backend operations without mutating anything"),
+                    ("run", "execute worktree and agent startup, then persist local state"),
+                ],
+                &[
+                    ("--task-url URL", "tracker task URL to persist on the slot"),
+                    ("--slot SLOT", "managed slot id"),
+                    ("--repo PATH", "source repository root"),
+                    ("--branch NAME", "branch name for the worktree"),
+                    ("--base REF", "base ref; defaults to HEAD"),
+                    ("--path PATH", "worktree checkout path"),
+                    ("--label NAME", "display label; defaults to slot"),
+                    ("--primary-cmd CMD", "primary agent command; defaults to config"),
+                    ("--critic-cmd CMD", "critic agent command; defaults to config"),
+                    ("--editor-cmd CMD", "editor command; defaults to config"),
+                    ("--with-editor/--no-editor", "include or skip editor pane"),
+                    ("--focus/--no-focus", "request backend focus behavior"),
+                ],
+                &[
+                    "maeh spawn plan --slot w1 --task-url https://task --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor",
+                    "maeh spawn run --slot w1 --task-url https://task --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor",
+                ],
+                &[
+                    "run mutates backend state and local maeh state.",
+                    "Use slot spawn for backend override aliases and safer default creation behavior.",
+                ],
+            );
+            true
+        }
+        "agent" => {
+            print_help_page(
+                "maeh agent",
+                &[
+                    "Deliver prompts to backend panes through the selected adapter.",
+                    "Delivery is backend-neutral and uses explicit submit/Enter operations.",
+                ],
+                &["maeh agent deliver [TARGET] [PROMPT] [OPTIONS]"],
+                &[("deliver", "plan or execute prompt delivery to a target pane or slot role")],
+                &[
+                    ("--target ID", "backend pane target; positional TARGET is also accepted"),
+                    ("--slot SLOT", "resolve target panes from a managed slot"),
+                    ("--role ROLE", "primary, critic, or both; defaults to both for slots"),
+                    ("--prompt TEXT", "prompt text to send"),
+                    ("--prompt-file PATH", "read prompt text from a file"),
+                    ("--pane-text TEXT", "pane contents to plan against without live read"),
+                    ("--pane-file PATH", "read pane contents from a file"),
+                    ("--exec", "execute delivery operations"),
+                ],
+                &[
+                    "maeh agent deliver w1:p2 \"Do the task\" --pane-text 'ready › '",
+                    "maeh agent deliver --slot w1 --role critic --prompt 'Review this' --exec",
+                ],
+                &[
+                    "Without --exec, the command prints the operations it would run.",
+                    "When --exec is used without pane text, maeh reads the live pane before planning.",
+                ],
+            );
+            true
+        }
+        "kickoff" => {
+            print_help_page(
+                "maeh kickoff",
+                &[
+                    "Plan or execute the initial prompt delivery to an agent pane.",
+                    "This uses the same delivery policy as agent deliver with plan/run naming.",
+                ],
+                &["maeh kickoff <plan|run> [TARGET] [PROMPT] [OPTIONS]"],
+                &[
+                    (
+                        "plan",
+                        "print prompt delivery operations without executing them",
+                    ),
+                    ("run", "execute prompt delivery operations"),
+                ],
+                &[
+                    (
+                        "--target ID",
+                        "backend pane target; positional TARGET is also accepted",
+                    ),
+                    ("--slot SLOT", "resolve target panes from a managed slot"),
+                    (
+                        "--role ROLE",
+                        "primary, critic, or both; defaults to both for slots",
+                    ),
+                    ("--prompt TEXT", "prompt text to send"),
+                    ("--prompt-file PATH", "read prompt text from a file"),
+                    (
+                        "--pane-text TEXT",
+                        "pane contents to plan against without live read",
+                    ),
+                    ("--pane-file PATH", "read pane contents from a file"),
+                ],
+                &[
+                    "maeh kickoff plan --target w1:p2 --prompt 'Do the task'",
+                    "maeh kickoff run --slot w1 --role primary --prompt-file kickoff.txt",
+                ],
+                &[
+                    "plan is read-only; run performs backend send operations.",
+                    "The delivery policy handles common trust/update/continue blockers safely.",
+                ],
+            );
+            true
+        }
+        "verify" => {
+            print_help_page(
+                "maeh verify",
+                &[
+                    "Verify evidence that a prompt was submitted or that a slot has required metadata.",
+                    "Use this in loop checks before considering agent startup or delivery complete.",
+                ],
+                &["maeh verify <prompt|slot> [OPTIONS]"],
+                &[
+                    ("prompt", "compare before/after pane text against a prompt"),
+                    ("slot", "verify local slot has worktree, primary pane, and critic pane"),
+                ],
+                &[
+                    ("--before TEXT", "pane text before delivery"),
+                    ("--before-file PATH", "read before text from a file"),
+                    ("--after TEXT", "pane text after delivery"),
+                    ("--after-file PATH", "read after text from a file"),
+                    ("--prompt TEXT", "prompt text that should have been submitted"),
+                    ("--prompt-file PATH", "read prompt text from a file"),
+                    ("--slot SLOT", "slot id for verify slot; positional slot is also accepted"),
+                ],
+                &[
+                    "maeh verify prompt --before '› Do it' --after 'Working' --prompt 'Do it'",
+                    "maeh verify slot w1",
+                ],
+                &[
+                    "prompt verification prints changed/submitted booleans and prompt head.",
+                    "slot verification checks local state only; it does not query the backend.",
+                ],
+            );
+            true
+        }
+        "slot" => {
+            print_help_page(
+                "maeh slot",
+                &[
+                    "List, inspect, classify, spawn, and mutate managed slot lifecycle state.",
+                    "This is the primary operator surface for cleanup, revamp, and active work management.",
+                ],
+                &["maeh slot <spawn|verify|close|list|inspect|classify|snooze|block|resume|nudge|remove-worktree|worktree-remove|count> [OPTIONS]"],
+                &[
+                    ("spawn", "plan or execute a managed workspace plus agents"),
+                    ("verify", "verify required local slot metadata"),
+                    ("close", "plan or execute backend workspace/window close"),
+                    ("list", "print tab-separated slot rows"),
+                    ("inspect", "print all metadata for one slot"),
+                    ("classify", "print one slot's lifecycle class"),
+                    ("snooze", "mark a slot snoozed or another requested status"),
+                    ("block", "mark a slot blocked with optional reason"),
+                    ("resume", "mark a slot active and clear snooze/block fields"),
+                    ("nudge", "record a nudge or deliver a prompt to a slot role"),
+                    ("remove-worktree", "plan or execute git worktree removal"),
+                    ("worktree-remove", "alias for remove-worktree"),
+                    ("count", "count slots matching class/status filters"),
+                ],
+                &[
+                    ("--slot SLOT", "slot id; many commands also accept positional slot"),
+                    ("--class CLASS", "list/count class filter; defaults vary by wrapper"),
+                    ("--status LIST", "comma-separated status filter or requested status"),
+                    ("--days N", "snooze until now + N days"),
+                    ("--until EPOCH", "snooze-until epoch"),
+                    ("--reason TEXT", "block reason"),
+                    ("--prompt TEXT", "nudge prompt to deliver"),
+                    ("--role ROLE", "primary, critic, or both for prompt delivery"),
+                    ("--plan", "force planning mode for close/remove-worktree"),
+                    ("--exec", "execute backend/git mutation when supported"),
+                    ("--pull-main", "pull origin main before worktree removal"),
+                ],
+                &[
+                    "maeh slot list --class done",
+                    "maeh slot inspect w1",
+                    "maeh slot snooze w1 --days 1 --status blocked",
+                    "maeh slot close w1 --exec",
+                    "maeh slot worktree-remove w1 --plan --pull-main",
+                ],
+                &[
+                    "Lifecycle state changes mutate local maeh state and append ledger rows.",
+                    "close and worktree removal require --exec to perform backend/git mutations.",
+                ],
+            );
+            true
+        }
+        "cleanup" => {
+            print_help_page(
+                "maeh cleanup",
+                &[
+                    "Cleanup-focused wrappers around slot list, inspect, close, and summary.",
+                    "Defaults are tuned for done slots so cleanup loops do not need to repeat filters.",
+                ],
+                &["maeh cleanup <list|inspect|close|summary> [OPTIONS]"],
+                &[
+                    ("list", "list slots; defaults to --class done"),
+                    ("inspect", "inspect one slot"),
+                    ("close", "plan or execute backend close for one slot"),
+                    ("summary", "print counts by lifecycle class"),
+                ],
+                &[
+                    ("--slot SLOT", "slot id; inspect/close also accept positional slot"),
+                    ("--class CLASS", "override list class filter"),
+                    ("--status LIST", "comma-separated status filter"),
+                    ("--plan", "force planning mode for close"),
+                    ("--exec", "execute backend close"),
+                ],
+                &[
+                    "maeh cleanup list",
+                    "maeh cleanup inspect --slot done-slot",
+                    "maeh cleanup close done-slot --exec",
+                    "maeh cleanup summary",
+                ],
+                &[
+                    "summary reads local state only.",
+                    "close delegates to the same implementation as maeh slot close.",
+                ],
+            );
+            true
+        }
+        "revamp" => {
+            print_help_page(
+                "maeh revamp",
+                &[
+                    "Stale-work wrappers for inspecting, snoozing, blocking, resuming, and nudging slots.",
+                    "Defaults are tuned for revamp loops that re-engage quiet unfinished work.",
+                ],
+                &["maeh revamp <list|inspect|snooze|block|resume|nudge|summary> [OPTIONS]"],
+                &[
+                    ("list", "list stale slots by default"),
+                    ("inspect", "inspect one slot"),
+                    ("snooze", "mark one slot snoozed or requested status"),
+                    ("block", "mark one slot blocked"),
+                    ("resume", "mark one slot active"),
+                    ("nudge", "record a nudge or deliver a prompt"),
+                    ("summary", "print counts by lifecycle class"),
+                ],
+                &[
+                    ("--slot SLOT", "slot id; most commands also accept positional slot"),
+                    ("--class CLASS", "override list class filter; defaults to stale"),
+                    ("--status LIST", "status filter or requested status"),
+                    ("--days N", "snooze until now + N days"),
+                    ("--until EPOCH", "snooze-until epoch"),
+                    ("--reason TEXT", "block reason"),
+                    ("--prompt TEXT", "nudge prompt to deliver"),
+                    ("--role ROLE", "primary, critic, or both for prompt delivery"),
+                ],
+                &[
+                    "maeh revamp list",
+                    "maeh revamp inspect w1",
+                    "maeh revamp block w1 --reason 'waiting on review'",
+                    "maeh revamp nudge w1 --role primary --prompt 'Please continue'",
+                ],
+                &[
+                    "list uses a 24h stale threshold by default.",
+                    "Mutation commands delegate to slot lifecycle implementations.",
+                ],
+            );
+            true
+        }
+        "status" => {
+            print_help_page(
+                "maeh status",
+                &[
+                    "Print backend-aware local status reports for slots and worktrees.",
+                    "Use statusline for a shorter prompt/status-bar friendly summary.",
+                ],
+                &["maeh status <list|inspect|worktrees> [OPTIONS]"],
+                &[
+                    ("list", "print tab-separated slot status rows"),
+                    ("inspect", "print all metadata for one slot"),
+                    ("worktrees", "print locally tracked worktree rows"),
+                ],
+                &[
+                    ("--slot SLOT", "slot id for inspect; positional slot is also accepted"),
+                    ("--class CLASS", "list class filter; defaults to all"),
+                    ("--status LIST", "comma-separated status filter"),
+                ],
+                &["maeh status list", "maeh status inspect w1", "maeh status worktrees"],
+                &[
+                    "Reports are based on local state; use backend discover/reconcile for live backend reads.",
+                ],
+            );
+            true
+        }
+        "cap" => {
+            print_help_page(
+                "maeh cap",
+                &[
+                    "Check active work and review counts against configured caps.",
+                    "Useful before dispatching more orchestrated work.",
+                ],
+                &["maeh cap <check>"],
+                &[(
+                    "check",
+                    "print work/review counts and whether work capacity remains",
+                )],
+                &[],
+                &["maeh cap check"],
+                &[
+                    "Active, blocked, and snoozed slots count against the work cap.",
+                    "Review-status slots count against the review cap.",
+                ],
+            );
+            true
+        }
+        "statusline" => {
+            print_help_page(
+                "maeh statusline",
+                &[
+                    "Print a compact single-line pool summary for prompts or shell status bars.",
+                    "The line includes work and review counts against configured caps.",
+                ],
+                &["maeh statusline"],
+                &[],
+                &[],
+                &["maeh statusline"],
+                &["Active and blocked slots count as work; review slots count as review."],
+            );
+            true
+        }
+        "work-hours" => {
+            print_help_page(
+                "maeh work-hours",
+                &[
+                    "Evaluate whether the current local day/hour is inside configured work hours.",
+                    "Loops can use this as a guard before dispatching non-urgent work.",
+                ],
+                &["maeh work-hours"],
+                &[],
+                &[],
+                &["maeh work-hours", "MAEH_DOW=1 MAEH_HOUR=10 maeh work-hours"],
+                &[
+                    "MAEH_DOW and MAEH_HOUR override the current time for tests and dry runs.",
+                    "Configured workdays use ISO weekday numbers where Monday is 1.",
+                ],
+            );
+            true
+        }
+        "doctor" => {
+            print_help_page(
+                "maeh doctor",
+                &[
+                    "Print diagnostic state for paths, config, backend selection, Herdr detection, and debug mode.",
+                    "Use this first when maeh behaves differently across machines or shells.",
+                ],
+                &["maeh doctor"],
+                &[],
+                &[],
+                &["maeh doctor", "MAEH_DEBUG=1 maeh doctor"],
+                &[
+                    "doctor is read-only and does not create missing state directories.",
+                    "Herdr detection comes from HERDR_ENV or HERDR_SOCKET_PATH.",
+                ],
+            );
+            true
+        }
+        "selftest" => {
+            print_help_page(
+                "maeh selftest",
+                &[
+                    "Validate that effective config and local state can be read.",
+                    "This is a minimal local health check for scripts and release checks.",
+                ],
+                &["maeh selftest"],
+                &[],
+                &[],
+                &["maeh selftest"],
+                &["selftest reads config and state only; it does not query backend tools."],
+            );
+            true
+        }
+        _ => false,
+    }
 }
 
 fn take_arg(args: &mut Vec<String>, name: &str) -> Result<String> {
@@ -1459,13 +2259,6 @@ fn list_ledger(home: &Path, loop_name: &str) -> Result<()> {
 }
 
 fn state_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
-    if args
-        .first()
-        .is_some_and(|arg| arg == "--help" || arg == "-h")
-    {
-        print_state_help();
-        return Ok(());
-    }
     match take_arg(args, "state command")?.as_str() {
         "tag" => state_tag(
             home,

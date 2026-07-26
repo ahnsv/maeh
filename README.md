@@ -87,6 +87,24 @@ maeh doctor
 maeh selftest
 ```
 
+## LLM agent usage
+
+Use `maeh --help` as the command index. The help output follows the relevant
+[CLI Guidelines](https://clig.dev/) shape: a concise no-argument summary, full
+`-h`/`--help`, example invocations, option descriptions, and plain text that is
+safe to pipe. When a narrower surface exists, prefer the subcommand help
+(`maeh state --help`) or the command contract in `docs/bash-helper-parity.md`
+before reading source.
+
+Agent-friendly invariants:
+
+- outputs are stable plain text designed for exact tests, logs, and shell parsing
+- command results go to stdout; errors and diagnostics go to stderr
+- list/plan/inspect commands are read-only; live backend mutations require an explicit `--exec`
+- `maeh backend list-task-slots` emits `slot task_url status snooze_until age_secs label primary_pane critic_pane worktree`
+- `maeh capsule prompt <url>` and `maeh prompt kickoff --url <task-url>` produce compact task context instead of forcing agents to repull full tracker pages
+- `llms.txt` is the compact repository map for LLMs that need a quick orientation before choosing commands or docs
+
 ## Design
 
 - deterministic local state under `MAEH_HOME` or `~/.maeh`
