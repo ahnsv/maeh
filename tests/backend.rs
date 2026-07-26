@@ -233,6 +233,42 @@ fn worktree_plan_and_spawn_plan_cover_herdr_and_tmux_no_editor() {
 }
 
 #[test]
+fn herdr_spawn_plan_sanitizes_agent_names_from_slot() {
+    let herdr = HerdrBackend::new("herdrx".to_string());
+    let mut request = spawn_request(false, false, true);
+    request.worktree.slot = "slot A/test!".to_string();
+
+    let spawn = herdr.spawn_plan(&request);
+    let primary = spawn
+        .iter()
+        .find(|op| op.action == "primary-agent")
+        .unwrap()
+        .command
+        .as_ref()
+        .unwrap();
+
+    assert_eq!(primary.args[2], "slot-A-test-primary");
+}
+
+#[test]
+fn herdr_spawn_plan_falls_back_to_role_for_all_invalid_slot() {
+    let herdr = HerdrBackend::new("herdrx".to_string());
+    let mut request = spawn_request(false, false, true);
+    request.worktree.slot = "!!!".to_string();
+
+    let spawn = herdr.spawn_plan(&request);
+    let critic = spawn
+        .iter()
+        .find(|op| op.action == "critic-agent")
+        .unwrap()
+        .command
+        .as_ref()
+        .unwrap();
+
+    assert_eq!(critic.args[2], "critic");
+}
+
+#[test]
 fn tmux_worktree_spawn_editor_and_error_paths_use_real_ids() {
     let adapter = tmux();
     let request = worktree_request(true, true, true);
