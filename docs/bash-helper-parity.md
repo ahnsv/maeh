@@ -42,7 +42,7 @@
 
 ## Live backend boundary
 
-The Rust surface now covers backend resolution, discovery, reconciliation, worktree/workspace open, primary/critic spawn, slot lifecycle/status/cleanup/revamp/cap wrappers, worktree removal planning/execution, prompt delivery, and prompt verification. Herdr uses `herdr worktree create|open`, `herdr agent start`, `herdr agent send`, `herdr workspace close`, and an explicit `herdr pane send-keys <pane> Enter` submit event. Tmux uses `git worktree add`, `tmux new-window`, `tmux split-window`, `tmux kill-window`, and explicit `tmux send-keys` text plus `Enter` events.
+The Rust surface now covers backend resolution, discovery, reconciliation, worktree/workspace open, primary/critic spawn, slot lifecycle/status/cleanup/revamp/cap wrappers, worktree removal planning/execution, prompt delivery, and prompt verification. Herdr uses `herdr worktree create|open`, `herdr pane split`, installed-shape `herdr agent start`, submitted `herdr pane run` prompt delivery, and `herdr workspace close`. Tmux uses `git worktree add`, `tmux new-window`, `tmux split-window`, `tmux kill-window`, and explicit `tmux send-keys` text plus `Enter` events.
 
 Prompt delivery policy is backend-neutral: pane text plus queued prompt becomes exactly one intent — submit queued prompt, answer a safe Codex trust/update/continue blocker, or no-op for busy/unknown panes. Adapters only translate that intent to Herdr or tmux commands.
 
