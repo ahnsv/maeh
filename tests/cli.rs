@@ -116,9 +116,10 @@ fn help_version_and_command_help_cover_existing_commands() {
     let output = maeh().arg("--help").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Usage:\n  maeh [GLOBAL OPTIONS] <command> [ARGS]\n"));
-    assert!(stdout.contains("  -V, --version    print version\n"));
-    assert!(stdout.contains("Run `maeh <command> --help` for command-specific usage"));
+    assert!(stdout.contains("Usage: maeh [OPTIONS] [COMMAND]"));
+    assert!(stdout.contains("Commands:"));
+    assert!(stdout.contains("Options:"));
+    assert!(stdout.contains("  -V, --version      Print version"));
 
     for command in [
         "init",
@@ -153,17 +154,13 @@ fn help_version_and_command_help_cover_existing_commands() {
         assert!(output.status.success(), "{command} --help failed");
         let help = String::from_utf8(output.stdout).unwrap();
         assert!(
-            help.starts_with(&format!("maeh {command}\n")),
-            "bad title for {command}: {help}"
+            help.contains(&format!("Usage: maeh {command}")),
+            "missing usage for {command}: {help}"
         );
+        assert!(help.contains("Options:"), "missing options for {command}");
         assert!(
-            help.contains("Description:\n"),
-            "missing description for {command}"
-        );
-        assert!(help.contains("Usage:\n"), "missing usage for {command}");
-        assert!(
-            help.contains("Examples:\n"),
-            "missing examples for {command}"
+            help.contains("-h, --help"),
+            "missing help flag for {command}"
         );
     }
 
@@ -240,8 +237,8 @@ fn help_version_and_command_help_cover_existing_commands() {
             );
             let subcommand_help = String::from_utf8(output.stdout).unwrap();
             assert!(
-                subcommand_help.starts_with(&format!("maeh {command}\n")),
-                "{command} {subcommand} --help did not print command help"
+                subcommand_help.contains(&format!("Usage: maeh {command} {subcommand}")),
+                "{command} {subcommand} --help did not print clap usage"
             );
         }
     }
@@ -264,6 +261,35 @@ fn usage_errors_are_exact() {
         .assert()
         .failure()
         .stderr("maeh error: usage: unknown config command wat\n");
+    maeh()
+        .arg("ledger")
+        .assert()
+        .failure()
+        .stderr("maeh error: usage: missing ledger command\n");
+    for (command, expected) in [
+        ("state", "missing state command"),
+        ("board-cache", "missing board-cache command"),
+        ("capsule", "missing capsule command"),
+        ("prompt", "missing prompt command"),
+        ("backend", "missing backend command"),
+        ("worktree", "missing worktree command"),
+        ("workspace", "missing workspace command"),
+        ("spawn", "missing spawn command"),
+        ("agent", "missing agent command"),
+        ("kickoff", "missing kickoff command"),
+        ("verify", "missing verify command"),
+        ("slot", "missing slot command"),
+        ("cleanup", "missing cleanup command"),
+        ("revamp", "missing revamp command"),
+        ("status", "missing status command"),
+        ("cap", "missing cap command"),
+    ] {
+        maeh()
+            .arg(command)
+            .assert()
+            .failure()
+            .stderr(format!("maeh error: usage: {expected}\n"));
+    }
     maeh()
         .args(["ledger", "wat"])
         .assert()
@@ -1377,6 +1403,18 @@ fn slot_wrapper_contracts_cover_lifecycle_paths() {
     maeh()
         .arg("--home")
         .arg(&home)
+        .args(["verify", "slot", "active"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["verify", "slot", "--slot", "active"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
         .args(["slot", "list", "--class", "done"])
         .assert()
         .success()
@@ -1418,6 +1456,12 @@ fn slot_wrapper_contracts_cover_lifecycle_paths() {
     maeh()
         .arg("--home")
         .arg(&home)
+        .args(["cleanup", "close", "--slot", "done", "--plan"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
         .args(["cleanup", "summary"])
         .assert()
         .success();
@@ -1450,6 +1494,12 @@ fn slot_wrapper_contracts_cover_lifecycle_paths() {
         .arg("--home")
         .arg(&home)
         .args(["revamp", "resume", "active"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["revamp", "nudge", "--slot", "active"])
         .assert()
         .success();
     maeh()
@@ -1694,6 +1744,21 @@ fn slot_spawn_and_agent_contract_cover_aliases_and_exec() {
         .assert()
         .success()
         .stdout("feat/spawned\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "agent",
+            "deliver",
+            "--target",
+            "spawned:p",
+            "--prompt",
+            "-hello",
+            "--pane-text",
+            "ready\n› ",
+        ])
+        .assert()
+        .success();
     maeh()
         .arg("--home")
         .arg(&home)
@@ -2050,6 +2115,20 @@ fn ledger_append_list_and_json_errors_are_line_asserted() {
     maeh()
         .arg("--home")
         .arg(&home)
+        .args(["ledger", "list"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args([
+            "ledger", "append", "--loop", "daily", "--event", "negative", "--data", "-1",
+        ])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
         .args([
             "ledger", "append", "--loop", "daily", "--event", "bad", "--data", "nope",
         ])
@@ -2070,6 +2149,12 @@ fn state_statusline_work_hours_and_selftest_are_exact() {
         .assert()
         .success()
         .stdout("state tagged\n  slot: w1\n  task_url: https://task\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "tag", "w1", "hyphen", "-value"])
+        .assert()
+        .success();
     maeh()
         .arg("--home")
         .arg(&home)

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{Datelike, Timelike};
+use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -35,42 +36,12 @@ enum MaehError {
     Backend(#[from] maeh::backend::BackendError),
     #[error("usage: {0}")]
     Usage(String),
+    #[error(transparent)]
+    Clap(#[from] clap::Error),
 }
 
 type Result<T> = std::result::Result<T, MaehError>;
 type State = BTreeMap<String, BTreeMap<String, String>>;
-
-const COMMANDS: &[(&str, &str)] = &[
-    ("init", "create local state directories and config"),
-    ("config", "inspect paths, effective config, and env exports"),
-    ("ledger", "append or list orchestration JSONL spans"),
-    ("state", "read and mutate local slot metadata"),
-    ("board-cache", "store and read tracker board snapshots"),
-    ("capsule", "store and render compact task context"),
-    ("prompt", "render reusable agent prompts"),
-    ("backend", "inspect and reconcile Herdr/tmux backend state"),
-    ("worktree", "plan or open backend worktrees/workspaces"),
-    ("workspace", "register or spawn managed backend workspaces"),
-    (
-        "spawn",
-        "plan or launch a worktree plus primary/critic agents",
-    ),
-    ("agent", "deliver prompts through backend adapters"),
-    ("kickoff", "plan or run queued prompt delivery"),
-    ("verify", "verify prompt or slot execution evidence"),
-    ("slot", "list, inspect, classify, and mutate managed slots"),
-    ("cleanup", "cleanup-oriented wrappers for done slots"),
-    (
-        "revamp",
-        "stale-work wrappers for resume/snooze/block/nudge",
-    ),
-    ("status", "backend-aware slot and worktree reports"),
-    ("cap", "check configured work/review caps"),
-    ("statusline", "print compact pool status"),
-    ("work-hours", "evaluate configured work-hour guard"),
-    ("doctor", "debug paths, config, backend, and env"),
-    ("selftest", "validate config/state readability"),
-];
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -124,101 +95,1309 @@ impl Default for Config {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(
+    name = "maeh",
+    version,
+    about = "Typed orchestration CLI for hmph and Herdr agents",
+    disable_help_subcommand = true
+)]
+struct Cli {
+    #[arg(
+        long,
+        value_name = "PATH",
+        global = true,
+        help = "Use alternate state directory"
+    )]
+    home: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    #[command(about = "Create local state directories and config")]
+    Init,
+    #[command(about = "Inspect paths, effective config, and env exports")]
+    Config(ConfigArgs),
+    #[command(about = "Append or list orchestration JSONL spans")]
+    Ledger(LedgerArgs),
+    #[command(about = "Read and mutate local slot metadata")]
+    State(StateArgs),
+    #[command(about = "Store and read tracker board snapshots")]
+    BoardCache(BoardCacheArgs),
+    #[command(about = "Store and render compact task context")]
+    Capsule(CapsuleArgs),
+    #[command(about = "Render reusable agent prompts")]
+    Prompt(PromptArgs),
+    #[command(about = "Inspect and reconcile Herdr/tmux backend state")]
+    Backend(BackendArgs),
+    #[command(about = "Plan or open backend worktrees/workspaces")]
+    Worktree(WorktreeArgs),
+    #[command(about = "Register or spawn managed backend workspaces")]
+    Workspace(WorkspaceArgs),
+    #[command(about = "Plan or launch a worktree plus primary/critic agents")]
+    Spawn(SpawnArgs),
+    #[command(about = "Deliver prompts through backend adapters")]
+    Agent(AgentArgs),
+    #[command(about = "Plan or run queued prompt delivery")]
+    Kickoff(KickoffArgs),
+    #[command(about = "Verify prompt or slot execution evidence")]
+    Verify(VerifyArgs),
+    #[command(about = "List, inspect, classify, and mutate managed slots")]
+    Slot(SlotArgs),
+    #[command(about = "Cleanup-oriented wrappers for done slots")]
+    Cleanup(CleanupArgs),
+    #[command(about = "Stale-work wrappers for resume/snooze/block/nudge")]
+    Revamp(RevampArgs),
+    #[command(about = "Backend-aware slot and worktree reports")]
+    Status(StatusArgs),
+    #[command(about = "Check configured work/review caps")]
+    Cap(CapArgs),
+    #[command(about = "Print compact pool status")]
+    Statusline,
+    #[command(about = "Evaluate configured work-hour guard")]
+    WorkHours,
+    #[command(about = "Debug paths, config, backend, and env")]
+    Doctor,
+    #[command(about = "Validate config/state readability")]
+    Selftest,
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct ConfigArgs {
+    #[command(subcommand)]
+    command: Option<ConfigSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigSubcommand {
+    #[command(about = "Print the config.toml path for the active home")]
+    Path,
+    #[command(about = "Print the effective human-readable config")]
+    Show,
+    #[command(about = "Print shell-friendly MAEH_* key/value lines")]
+    Emit,
+    #[command(about = "Persist the default home in the XDG config")]
+    SetHome(ConfigSetHomeArgs),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct ConfigSetHomeArgs {
+    #[arg(value_name = "PATH", allow_hyphen_values = true)]
+    path: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct LedgerArgs {
+    #[command(subcommand)]
+    command: Option<LedgerSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum LedgerSubcommand {
+    #[command(about = "Append one span row to <home>/ledger/<loop>.jsonl")]
+    Append(LedgerAppendArgs),
+    #[command(about = "Print rows from a loop ledger file")]
+    List(LedgerListArgs),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct LedgerAppendArgs {
+    #[arg(long = "loop", value_name = "NAME", num_args = 0..=1, allow_hyphen_values = true)]
+    loop_name: Option<Option<String>>,
+    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    event: Option<String>,
+    #[arg(long, value_name = "VALUE", allow_hyphen_values = true)]
+    target: Option<String>,
+    #[arg(long, value_name = "JSON", allow_hyphen_values = true)]
+    data: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct LedgerListArgs {
+    #[arg(long = "loop", value_name = "NAME", num_args = 0..=1, allow_hyphen_values = true)]
+    loop_name: Option<Option<String>>,
+}
+
+#[derive(Args, Debug)]
+struct StateArgs {
+    #[command(subcommand)]
+    command: Option<StateSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum StateSubcommand {
+    #[command(about = "Set a key/value on a slot")]
+    Tag {
+        #[arg(allow_hyphen_values = true)]
+        slot: String,
+        #[arg(allow_hyphen_values = true)]
+        key: String,
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
+    #[command(about = "Remove one key from a slot")]
+    Untag {
+        #[arg(allow_hyphen_values = true)]
+        slot: String,
+        #[arg(allow_hyphen_values = true)]
+        key: String,
+    },
+    #[command(about = "Print one slot value")]
+    Get {
+        #[arg(allow_hyphen_values = true)]
+        slot: String,
+        #[arg(allow_hyphen_values = true)]
+        key: String,
+    },
+    #[command(about = "Print tab-separated slot summary rows")]
+    List,
+    #[command(about = "Shortcut for get <slot> worktree")]
+    Worktree {
+        #[arg(allow_hyphen_values = true)]
+        slot: String,
+    },
+    #[command(about = "Remove the local slot record")]
+    DeleteSlot {
+        #[arg(allow_hyphen_values = true)]
+        slot: String,
+    },
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct BoardCacheArgs {
+    #[command(subcommand)]
+    command: Option<BoardCacheSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum BoardCacheSubcommand {
+    #[command(about = "Read JSON from stdin and store it under a cache key")]
+    Put(KeyArg),
+    #[command(about = "Print cached JSON when it exists and is fresh")]
+    Get(BoardCacheGetArgs),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct KeyArg {
+    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    key: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct BoardCacheGetArgs {
+    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    key: Option<String>,
+    #[arg(long)]
+    stale: bool,
+}
+
+#[derive(Args, Debug)]
+struct CapsuleArgs {
+    #[command(subcommand)]
+    command: Option<CapsuleSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum CapsuleSubcommand {
+    #[command(about = "Read JSON from stdin and cache it for a task URL")]
+    Put(CapsuleUrlArgs),
+    #[command(about = "Print cached capsule JSON")]
+    Get(CapsuleUrlArgs),
+    #[command(about = "Render cached capsule inside a prompt block")]
+    Prompt(CapsuleUrlArgs),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct CapsuleUrlArgs {
+    #[arg(allow_hyphen_values = true)]
+    url: String,
+    #[arg(long, value_name = "VALUE", allow_hyphen_values = true)]
+    edited: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct PromptArgs {
+    #[command(subcommand)]
+    command: Option<PromptSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum PromptSubcommand {
+    #[command(about = "Render the standard kickoff prompt for a tracker task")]
+    Kickoff(PromptKickoffArgs),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct PromptKickoffArgs {
+    #[arg(long, value_name = "URL", allow_hyphen_values = true)]
+    url: Option<String>,
+    #[arg(long = "capsule-file", value_name = "PATH", allow_hyphen_values = true)]
+    capsule_file: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct BackendArgs {
+    #[arg(long, value_name = "PATH", global = true, allow_hyphen_values = true)]
+    fixture: Option<String>,
+    #[arg(long, global = true)]
+    exec: bool,
+    #[command(subcommand)]
+    command: Option<BackendSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum BackendSubcommand {
+    #[command(about = "Print the backend discovery command without running it")]
+    Plan,
+    #[command(about = "Read backend state and print normalized slot rows")]
+    Discover,
+    #[command(about = "Compare backend state with local state and print operations")]
+    Reconcile,
+    #[command(about = "Print task-oriented slot rows")]
+    ListTaskSlots,
+    #[command(about = "Print locally tracked worktree rows")]
+    ListWorktrees,
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct WorktreeArgs {
+    #[command(subcommand)]
+    command: Option<WorktreeSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum WorktreeSubcommand {
+    #[command(about = "Print backend operations without mutating anything")]
+    Plan(WorktreeOptions),
+    #[command(about = "Execute worktree/workspace creation and persist local state")]
+    Open(WorktreeOptions),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct WorktreeOptions {
+    #[arg(long, value_name = "SLOT", allow_hyphen_values = true)]
+    slot: Option<String>,
+    #[arg(long, value_name = "PATH", allow_hyphen_values = true)]
+    repo: Option<String>,
+    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    branch: Option<String>,
+    #[arg(long, value_name = "REF", allow_hyphen_values = true)]
+    base: Option<String>,
+    #[arg(long, value_name = "PATH", allow_hyphen_values = true)]
+    path: Option<String>,
+    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    label: Option<String>,
+    #[arg(long)]
+    create: bool,
+    #[command(flatten)]
+    layout: LayoutArgs,
+}
+
+#[derive(Args, Debug, Default)]
+struct LayoutArgs {
+    #[arg(long = "with-editor")]
+    with_editor: bool,
+    #[arg(long = "no-editor")]
+    no_editor: bool,
+    #[arg(long, value_name = "BOOL", allow_hyphen_values = true)]
+    editor: Option<String>,
+    #[arg(long)]
+    focus: bool,
+    #[arg(long = "no-focus")]
+    no_focus: bool,
+}
+
+#[derive(Args, Debug)]
+struct WorkspaceArgs {
+    #[command(subcommand)]
+    command: Option<WorkspaceSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum WorkspaceSubcommand {
+    #[command(about = "Persist an existing workspace, panes, worktree, and metadata")]
+    Register(WorkspaceRegisterArgs),
+    #[command(about = "Plan or execute a managed workspace plus agent spawn")]
+    Spawn(SlotSpawnOptions),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct WorkspaceRegisterArgs {
+    #[arg(long, value_name = "SLOT", allow_hyphen_values = true)]
+    slot: String,
+    #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+    workspace: String,
+    #[arg(long, value_name = "PATH", allow_hyphen_values = true)]
+    worktree: String,
+    #[arg(long, value_name = "PATH", allow_hyphen_values = true)]
+    repo: Option<String>,
+    #[arg(long = "task-url", value_name = "URL", allow_hyphen_values = true)]
+    task_url: Option<String>,
+    #[arg(long = "primary-pane", value_name = "ID", allow_hyphen_values = true)]
+    primary_pane: Option<String>,
+    #[arg(long = "critic-pane", value_name = "ID", allow_hyphen_values = true)]
+    critic_pane: Option<String>,
+    #[arg(long = "editor-pane", value_name = "ID", allow_hyphen_values = true)]
+    editor_pane: Option<String>,
+    #[arg(long, value_name = "KIND", allow_hyphen_values = true)]
+    backend: Option<String>,
+    #[arg(long, value_name = "VALUE", allow_hyphen_values = true)]
+    status: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct SpawnArgs {
+    #[command(subcommand)]
+    command: Option<SpawnSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum SpawnSubcommand {
+    #[command(about = "Print backend operations without mutating anything")]
+    Plan(SpawnOptions),
+    #[command(about = "Execute worktree and agent startup, then persist local state")]
+    Run(SpawnOptions),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct SpawnOptions {
+    #[arg(long = "task-url", value_name = "URL", allow_hyphen_values = true)]
+    task_url: String,
+    #[command(flatten)]
+    worktree: WorktreeOptions,
+    #[arg(long = "primary-cmd", value_name = "CMD", allow_hyphen_values = true)]
+    primary_cmd: Option<String>,
+    #[arg(long = "critic-cmd", value_name = "CMD", allow_hyphen_values = true)]
+    critic_cmd: Option<String>,
+    #[arg(long = "editor-cmd", value_name = "CMD", allow_hyphen_values = true)]
+    editor_cmd: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct SlotSpawnOptions {
+    #[arg(long, value_name = "KIND", allow_hyphen_values = true)]
+    backend: Option<String>,
+    #[arg(long)]
+    exec: bool,
+    #[arg(long, value_name = "SLOT", allow_hyphen_values = true)]
+    slot: Option<String>,
+    #[arg(
+        long,
+        alias = "repo-root",
+        value_name = "PATH",
+        allow_hyphen_values = true
+    )]
+    repo: String,
+    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    branch: Option<String>,
+    #[arg(long, value_name = "REF", allow_hyphen_values = true)]
+    base: Option<String>,
+    #[arg(
+        long,
+        alias = "worktree",
+        value_name = "PATH",
+        allow_hyphen_values = true
+    )]
+    path: String,
+    #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
+    label: Option<String>,
+    #[arg(long)]
+    create: bool,
+    #[arg(long = "open-existing")]
+    open_existing: bool,
+    #[arg(long = "task-url", value_name = "URL", allow_hyphen_values = true)]
+    task_url: String,
+    #[arg(long = "primary-cmd", value_name = "CMD", allow_hyphen_values = true)]
+    primary_cmd: Option<String>,
+    #[arg(long = "critic-cmd", value_name = "CMD", allow_hyphen_values = true)]
+    critic_cmd: Option<String>,
+    #[arg(long = "editor-cmd", value_name = "CMD", allow_hyphen_values = true)]
+    editor_cmd: Option<String>,
+    #[command(flatten)]
+    layout: LayoutArgs,
+}
+
+#[derive(Args, Debug)]
+struct AgentArgs {
+    #[command(subcommand)]
+    command: Option<AgentSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum AgentSubcommand {
+    #[command(about = "Plan or execute prompt delivery to a target pane or slot role")]
+    Deliver(AgentDeliverArgs),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct AgentDeliverArgs {
+    #[command(flatten)]
+    deliver: DeliverArgs,
+    #[arg(long)]
+    exec: bool,
+}
+
+#[derive(Args, Debug, Default)]
+struct DeliverArgs {
+    #[arg(value_name = "TARGET", allow_hyphen_values = true)]
+    positional_target: Option<String>,
+    #[arg(value_name = "PROMPT", allow_hyphen_values = true)]
+    positional_prompt: Option<String>,
+    #[arg(long, value_name = "ID", allow_hyphen_values = true)]
+    target: Option<String>,
+    #[arg(long, value_name = "SLOT", allow_hyphen_values = true)]
+    slot: Option<String>,
+    #[arg(long, value_name = "ROLE", allow_hyphen_values = true)]
+    role: Option<String>,
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    prompt: Option<String>,
+    #[arg(long = "prompt-file", value_name = "PATH", allow_hyphen_values = true)]
+    prompt_file: Option<String>,
+    #[arg(long = "pane-text", value_name = "TEXT", allow_hyphen_values = true)]
+    pane_text: Option<String>,
+    #[arg(long = "pane-file", value_name = "PATH", allow_hyphen_values = true)]
+    pane_file: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct KickoffArgs {
+    #[command(subcommand)]
+    command: Option<KickoffSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum KickoffSubcommand {
+    #[command(about = "Print prompt delivery operations without executing them")]
+    Plan(DeliverArgs),
+    #[command(about = "Execute prompt delivery operations")]
+    Run(DeliverArgs),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct VerifyArgs {
+    #[command(subcommand)]
+    command: Option<VerifySubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum VerifySubcommand {
+    #[command(about = "Compare before/after pane text against a prompt")]
+    Prompt(VerifyPromptArgs),
+    #[command(about = "Verify local slot has worktree, primary pane, and critic pane")]
+    Slot(SlotRefArgs),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct VerifyPromptArgs {
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    before: Option<String>,
+    #[arg(long = "before-file", value_name = "PATH", allow_hyphen_values = true)]
+    before_file: Option<String>,
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    after: Option<String>,
+    #[arg(long = "after-file", value_name = "PATH", allow_hyphen_values = true)]
+    after_file: Option<String>,
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    prompt: Option<String>,
+    #[arg(long = "prompt-file", value_name = "PATH", allow_hyphen_values = true)]
+    prompt_file: Option<String>,
+}
+
+#[derive(Args, Debug, Default)]
+struct SlotRefArgs {
+    #[arg(value_name = "SLOT", allow_hyphen_values = true)]
+    slot: Option<String>,
+    #[arg(long = "slot", value_name = "SLOT", allow_hyphen_values = true)]
+    slot_flag: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct SlotArgs {
+    #[command(subcommand)]
+    command: Option<SlotSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum SlotSubcommand {
+    #[command(about = "Plan or execute a managed workspace plus agents")]
+    Spawn(SlotSpawnOptions),
+    #[command(about = "Verify required local slot metadata")]
+    Verify(SlotRefArgs),
+    #[command(about = "Plan or execute backend workspace/window close")]
+    Close(SlotCloseArgs),
+    #[command(about = "Print tab-separated slot rows")]
+    List(FilterArgs),
+    #[command(about = "Print all metadata for one slot")]
+    Inspect(SlotRefArgs),
+    #[command(about = "Print one slot's lifecycle class")]
+    Classify(SlotRefArgs),
+    #[command(about = "Mark a slot snoozed or another requested status")]
+    Snooze(SlotMarkArgs),
+    #[command(about = "Mark a slot blocked with optional reason")]
+    Block(SlotMarkArgs),
+    #[command(about = "Mark a slot active and clear snooze/block fields")]
+    Resume(SlotMarkArgs),
+    #[command(about = "Mark a slot ready for review")]
+    Review(SlotMarkArgs),
+    #[command(about = "Record a nudge or deliver a prompt to a slot role")]
+    Nudge(SlotNudgeArgs),
+    #[command(about = "Plan or execute git worktree removal")]
+    RemoveWorktree(SlotWorktreeRemoveArgs),
+    #[command(name = "worktree-remove", about = "Alias for remove-worktree")]
+    WorktreeRemove(SlotWorktreeRemoveArgs),
+    #[command(about = "Count slots matching class/status filters")]
+    Count(FilterArgs),
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug, Default)]
+struct FilterArgs {
+    #[arg(long = "class", value_name = "CLASS", allow_hyphen_values = true)]
+    class_filter: Option<String>,
+    #[arg(long, value_name = "LIST", allow_hyphen_values = true)]
+    status: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct SlotMarkArgs {
+    #[command(flatten)]
+    slot: SlotRefArgs,
+    #[arg(long, value_name = "LIST", allow_hyphen_values = true)]
+    status: Option<String>,
+    #[arg(long, value_name = "N", allow_hyphen_values = true)]
+    days: Option<String>,
+    #[arg(long, value_name = "EPOCH", allow_hyphen_values = true)]
+    until: Option<String>,
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    reason: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct SlotNudgeArgs {
+    #[command(flatten)]
+    slot: SlotRefArgs,
+    #[arg(long, value_name = "ROLE", allow_hyphen_values = true)]
+    role: Option<String>,
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    prompt: Option<String>,
+    #[arg(long = "prompt-file", value_name = "PATH", allow_hyphen_values = true)]
+    prompt_file: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct SlotCloseArgs {
+    #[command(flatten)]
+    slot: SlotRefArgs,
+    #[arg(long)]
+    plan: bool,
+    #[arg(long)]
+    exec: bool,
+}
+
+#[derive(Args, Debug)]
+struct SlotWorktreeRemoveArgs {
+    #[command(flatten)]
+    slot: SlotRefArgs,
+    #[arg(long)]
+    plan: bool,
+    #[arg(long)]
+    exec: bool,
+    #[arg(long = "pull-main")]
+    pull_main: bool,
+}
+
+#[derive(Args, Debug)]
+struct CleanupArgs {
+    #[command(subcommand)]
+    command: Option<CleanupSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum CleanupSubcommand {
+    #[command(about = "List slots; defaults to --class done")]
+    List(FilterArgs),
+    #[command(about = "Inspect one slot")]
+    Inspect(SlotRefArgs),
+    #[command(about = "Plan or execute backend close for one slot")]
+    Close(SlotCloseArgs),
+    #[command(about = "Print counts by lifecycle class")]
+    Summary,
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct RevampArgs {
+    #[command(subcommand)]
+    command: Option<RevampSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum RevampSubcommand {
+    #[command(about = "List stale slots by default")]
+    List(FilterArgs),
+    #[command(about = "Inspect one slot")]
+    Inspect(SlotRefArgs),
+    #[command(about = "Mark one slot snoozed or requested status")]
+    Snooze(SlotMarkArgs),
+    #[command(about = "Mark one slot blocked")]
+    Block(SlotMarkArgs),
+    #[command(about = "Mark one slot active")]
+    Resume(SlotMarkArgs),
+    #[command(about = "Record a nudge or deliver a prompt")]
+    Nudge(SlotNudgeArgs),
+    #[command(about = "Print counts by lifecycle class")]
+    Summary,
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct StatusArgs {
+    #[command(subcommand)]
+    command: Option<StatusSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum StatusSubcommand {
+    #[command(about = "Print tab-separated slot status rows")]
+    List(FilterArgs),
+    #[command(about = "Print all metadata for one slot")]
+    Inspect(SlotRefArgs),
+    #[command(about = "Print locally tracked worktree rows")]
+    Worktrees,
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct CapArgs {
+    #[command(subcommand)]
+    command: Option<CapSubcommand>,
+}
+
+#[derive(Subcommand, Debug)]
+enum CapSubcommand {
+    #[command(about = "Print work/review counts and whether work capacity remains")]
+    Check,
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+impl Commands {
+    fn dispatch(self, home: &Path) -> Result<()> {
+        match self {
+            Self::Init => init(home),
+            Self::Config(command) => config_command(home, &mut command.into_args()),
+            Self::Ledger(command) => ledger_command(home, &mut command.into_args()),
+            Self::State(command) => state_command(home, &mut command.into_args()),
+            Self::BoardCache(command) => board_cache_command(home, &mut command.into_args()),
+            Self::Capsule(command) => capsule_command(home, &mut command.into_args()),
+            Self::Prompt(command) => prompt_command(&mut command.into_args()),
+            Self::Backend(command) => backend_command(home, &mut command.into_args()),
+            Self::Worktree(command) => worktree_command(home, &mut command.into_args()),
+            Self::Workspace(command) => workspace_command(home, &mut command.into_args()),
+            Self::Spawn(command) => spawn_command(home, &mut command.into_args()),
+            Self::Agent(command) => agent_command(home, &mut command.into_args()),
+            Self::Kickoff(command) => kickoff_command(home, &mut command.into_args()),
+            Self::Verify(command) => verify_command(home, &mut command.into_args()),
+            Self::Slot(command) => slot_command(home, &mut command.into_args()),
+            Self::Cleanup(command) => cleanup_command(home, &mut command.into_args()),
+            Self::Revamp(command) => revamp_command(home, &mut command.into_args()),
+            Self::Status(command) => status_command(home, &mut command.into_args()),
+            Self::Cap(command) => cap_command(home, &mut command.into_args()),
+            Self::Statusline => statusline(home),
+            Self::WorkHours => work_hours(home),
+            Self::Doctor => doctor(home),
+            Self::Selftest => selftest(home),
+            Self::External(args) => Err(MaehError::Usage(format!(
+                "unknown command {}",
+                args.first().map_or("", String::as_str)
+            ))),
+        }
+    }
+}
+
+impl ConfigArgs {
+    fn into_args(self) -> Vec<String> {
+        vec![match self.command {
+            Some(ConfigSubcommand::Path) => "path".to_string(),
+            Some(ConfigSubcommand::Show) => "show".to_string(),
+            Some(ConfigSubcommand::Emit) => "emit".to_string(),
+            Some(ConfigSubcommand::SetHome(command)) => {
+                let mut args = vec!["set-home".to_string()];
+                push_pos(&mut args, &command.path);
+                return args;
+            }
+            Some(ConfigSubcommand::External(args)) => return args,
+            None => return Vec::new(),
+        }]
+    }
+}
+
+impl LedgerArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(LedgerSubcommand::Append(command)) => {
+                let mut args = vec!["append".to_string()];
+                push_optional_maybe(&mut args, "--loop", &command.loop_name);
+                push_optional(&mut args, "--event", &command.event);
+                push_optional(&mut args, "--target", &command.target);
+                push_optional(&mut args, "--data", &command.data);
+                args
+            }
+            Some(LedgerSubcommand::List(command)) => {
+                let mut args = vec!["list".to_string()];
+                push_optional_maybe(&mut args, "--loop", &command.loop_name);
+                args
+            }
+            Some(LedgerSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl StateArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(StateSubcommand::Tag { slot, key, value }) => {
+                vec!["tag".to_string(), slot, key, value]
+            }
+            Some(StateSubcommand::Untag { slot, key }) => vec!["untag".to_string(), slot, key],
+            Some(StateSubcommand::Get { slot, key }) => vec!["get".to_string(), slot, key],
+            Some(StateSubcommand::List) => vec!["list".to_string()],
+            Some(StateSubcommand::Worktree { slot }) => vec!["worktree".to_string(), slot],
+            Some(StateSubcommand::DeleteSlot { slot }) => vec!["delete-slot".to_string(), slot],
+            Some(StateSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl BoardCacheArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(BoardCacheSubcommand::Put(command)) => {
+                let mut args = vec!["put".to_string()];
+                push_optional(&mut args, "--key", &command.key);
+                args
+            }
+            Some(BoardCacheSubcommand::Get(command)) => {
+                let mut args = vec!["get".to_string()];
+                push_optional(&mut args, "--key", &command.key);
+                push_present(&mut args, "--stale", command.stale);
+                args
+            }
+            Some(BoardCacheSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl CapsuleArgs {
+    fn into_args(self) -> Vec<String> {
+        let (name, command) = match self.command {
+            Some(CapsuleSubcommand::Put(command)) => ("put", command),
+            Some(CapsuleSubcommand::Get(command)) => ("get", command),
+            Some(CapsuleSubcommand::Prompt(command)) => ("prompt", command),
+            Some(CapsuleSubcommand::External(args)) => return args,
+            None => return Vec::new(),
+        };
+        let mut args = vec![name.to_string(), command.url];
+        push_optional(&mut args, "--edited", &command.edited);
+        args
+    }
+}
+
+impl PromptArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(PromptSubcommand::Kickoff(command)) => {
+                let mut args = vec!["kickoff".to_string()];
+                push_optional(&mut args, "--url", &command.url);
+                push_optional(&mut args, "--capsule-file", &command.capsule_file);
+                args
+            }
+            Some(PromptSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl BackendArgs {
+    fn into_args(self) -> Vec<String> {
+        let mut args = vec![match self.command {
+            Some(BackendSubcommand::Plan) => "plan",
+            Some(BackendSubcommand::Discover) => "discover",
+            Some(BackendSubcommand::Reconcile) => "reconcile",
+            Some(BackendSubcommand::ListTaskSlots) => "list-task-slots",
+            Some(BackendSubcommand::ListWorktrees) => "list-worktrees",
+            Some(BackendSubcommand::External(args)) => return args,
+            None => return Vec::new(),
+        }
+        .to_string()];
+        push_optional(&mut args, "--fixture", &self.fixture);
+        push_present(&mut args, "--exec", self.exec);
+        args
+    }
+}
+
+impl WorktreeArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(WorktreeSubcommand::Plan(command)) => {
+                let mut args = vec!["plan".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(WorktreeSubcommand::Open(command)) => {
+                let mut args = vec!["open".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(WorktreeSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl WorktreeOptions {
+    fn append(&self, args: &mut Vec<String>) {
+        push_optional(args, "--slot", &self.slot);
+        push_optional(args, "--repo", &self.repo);
+        push_optional(args, "--branch", &self.branch);
+        push_optional(args, "--base", &self.base);
+        push_optional(args, "--path", &self.path);
+        push_optional(args, "--label", &self.label);
+        push_present(args, "--create", self.create);
+        self.layout.append(args);
+    }
+}
+
+impl LayoutArgs {
+    fn append(&self, args: &mut Vec<String>) {
+        push_present(args, "--with-editor", self.with_editor);
+        push_present(args, "--no-editor", self.no_editor);
+        push_optional(args, "--editor", &self.editor);
+        push_present(args, "--focus", self.focus);
+        push_present(args, "--no-focus", self.no_focus);
+    }
+}
+
+impl WorkspaceArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(WorkspaceSubcommand::Register(command)) => {
+                let mut args = vec!["register".to_string()];
+                push_pair(&mut args, "--slot", &command.slot);
+                push_pair(&mut args, "--workspace", &command.workspace);
+                push_pair(&mut args, "--worktree", &command.worktree);
+                push_optional(&mut args, "--repo", &command.repo);
+                push_optional(&mut args, "--task-url", &command.task_url);
+                push_optional(&mut args, "--primary-pane", &command.primary_pane);
+                push_optional(&mut args, "--critic-pane", &command.critic_pane);
+                push_optional(&mut args, "--editor-pane", &command.editor_pane);
+                push_optional(&mut args, "--backend", &command.backend);
+                push_optional(&mut args, "--status", &command.status);
+                args
+            }
+            Some(WorkspaceSubcommand::Spawn(command)) => {
+                let mut args = vec!["spawn".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(WorkspaceSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl SpawnArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(SpawnSubcommand::Plan(command)) => {
+                let mut args = vec!["plan".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(SpawnSubcommand::Run(command)) => {
+                let mut args = vec!["run".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(SpawnSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl SpawnOptions {
+    fn append(&self, args: &mut Vec<String>) {
+        push_pair(args, "--task-url", &self.task_url);
+        self.worktree.append(args);
+        push_optional(args, "--primary-cmd", &self.primary_cmd);
+        push_optional(args, "--critic-cmd", &self.critic_cmd);
+        push_optional(args, "--editor-cmd", &self.editor_cmd);
+    }
+}
+
+impl SlotSpawnOptions {
+    fn append(&self, args: &mut Vec<String>) {
+        push_optional(args, "--backend", &self.backend);
+        push_present(args, "--exec", self.exec);
+        push_optional(args, "--slot", &self.slot);
+        push_pair(args, "--repo", &self.repo);
+        push_optional(args, "--branch", &self.branch);
+        push_optional(args, "--base", &self.base);
+        push_pair(args, "--path", &self.path);
+        push_optional(args, "--label", &self.label);
+        push_present(args, "--create", self.create);
+        push_present(args, "--open-existing", self.open_existing);
+        push_pair(args, "--task-url", &self.task_url);
+        push_optional(args, "--primary-cmd", &self.primary_cmd);
+        push_optional(args, "--critic-cmd", &self.critic_cmd);
+        push_optional(args, "--editor-cmd", &self.editor_cmd);
+        self.layout.append(args);
+    }
+}
+
+impl AgentArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(AgentSubcommand::Deliver(command)) => {
+                let mut args = vec!["deliver".to_string()];
+                command.deliver.append(&mut args);
+                push_present(&mut args, "--exec", command.exec);
+                args
+            }
+            Some(AgentSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl DeliverArgs {
+    fn append(&self, args: &mut Vec<String>) {
+        push_pos(args, &self.positional_target);
+        push_pos(args, &self.positional_prompt);
+        push_optional(args, "--target", &self.target);
+        push_optional(args, "--slot", &self.slot);
+        push_optional(args, "--role", &self.role);
+        push_optional(args, "--prompt", &self.prompt);
+        push_optional(args, "--prompt-file", &self.prompt_file);
+        push_optional(args, "--pane-text", &self.pane_text);
+        push_optional(args, "--pane-file", &self.pane_file);
+    }
+}
+
+impl KickoffArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(KickoffSubcommand::Plan(command)) => {
+                let mut args = vec!["plan".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(KickoffSubcommand::Run(command)) => {
+                let mut args = vec!["run".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(KickoffSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl VerifyArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(VerifySubcommand::Prompt(command)) => {
+                let mut args = vec!["prompt".to_string()];
+                push_optional(&mut args, "--before", &command.before);
+                push_optional(&mut args, "--before-file", &command.before_file);
+                push_optional(&mut args, "--after", &command.after);
+                push_optional(&mut args, "--after-file", &command.after_file);
+                push_optional(&mut args, "--prompt", &command.prompt);
+                push_optional(&mut args, "--prompt-file", &command.prompt_file);
+                args
+            }
+            Some(VerifySubcommand::Slot(slot)) => {
+                let mut args = vec!["slot".to_string()];
+                slot.append_value(&mut args);
+                args
+            }
+            Some(VerifySubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl SlotArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(SlotSubcommand::Spawn(command)) => {
+                let mut args = vec!["spawn".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(SlotSubcommand::Verify(slot)) => slot_command_args("verify", slot),
+            Some(SlotSubcommand::Close(command)) => {
+                let mut args = vec!["close".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(SlotSubcommand::List(filter)) => filter_args("list", filter),
+            Some(SlotSubcommand::Inspect(slot)) => slot_command_args("inspect", slot),
+            Some(SlotSubcommand::Classify(slot)) => slot_command_args("classify", slot),
+            Some(SlotSubcommand::Snooze(command)) => mark_args("snooze", command),
+            Some(SlotSubcommand::Block(command)) => mark_args("block", command),
+            Some(SlotSubcommand::Resume(command)) => mark_args("resume", command),
+            Some(SlotSubcommand::Review(command)) => mark_args("review", command),
+            Some(SlotSubcommand::Nudge(command)) => {
+                let mut args = vec!["nudge".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(SlotSubcommand::RemoveWorktree(command)) => {
+                let mut args = vec!["remove-worktree".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(SlotSubcommand::WorktreeRemove(command)) => {
+                let mut args = vec!["worktree-remove".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(SlotSubcommand::Count(filter)) => filter_args("count", filter),
+            Some(SlotSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl SlotRefArgs {
+    fn append_value(&self, args: &mut Vec<String>) {
+        if let Some(slot) = &self.slot_flag {
+            args.push(slot.clone());
+        } else {
+            push_pos(args, &self.slot);
+        }
+    }
+
+    fn append_flag_or_value(&self, args: &mut Vec<String>) {
+        if let Some(slot) = &self.slot_flag {
+            push_pair(args, "--slot", slot);
+        } else {
+            push_pos(args, &self.slot);
+        }
+    }
+}
+
+impl SlotMarkArgs {
+    fn append(&self, args: &mut Vec<String>) {
+        self.slot.append_flag_or_value(args);
+        push_optional(args, "--status", &self.status);
+        push_optional(args, "--days", &self.days);
+        push_optional(args, "--until", &self.until);
+        push_optional(args, "--reason", &self.reason);
+    }
+}
+
+impl SlotNudgeArgs {
+    fn append(&self, args: &mut Vec<String>) {
+        self.slot.append_flag_or_value(args);
+        push_optional(args, "--role", &self.role);
+        push_optional(args, "--prompt", &self.prompt);
+        push_optional(args, "--prompt-file", &self.prompt_file);
+    }
+}
+
+impl SlotCloseArgs {
+    fn append(&self, args: &mut Vec<String>) {
+        self.slot.append_flag_or_value(args);
+        push_present(args, "--plan", self.plan);
+        push_present(args, "--exec", self.exec);
+    }
+}
+
+impl SlotWorktreeRemoveArgs {
+    fn append(&self, args: &mut Vec<String>) {
+        self.slot.append_flag_or_value(args);
+        push_present(args, "--plan", self.plan);
+        push_present(args, "--exec", self.exec);
+        push_present(args, "--pull-main", self.pull_main);
+    }
+}
+
+impl CleanupArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(CleanupSubcommand::List(filter)) => filter_args("list", filter),
+            Some(CleanupSubcommand::Inspect(slot)) => slot_command_args("inspect", slot),
+            Some(CleanupSubcommand::Close(command)) => {
+                let mut args = vec!["close".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(CleanupSubcommand::Summary) => vec!["summary".to_string()],
+            Some(CleanupSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl RevampArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(RevampSubcommand::List(filter)) => filter_args("list", filter),
+            Some(RevampSubcommand::Inspect(slot)) => slot_command_args("inspect", slot),
+            Some(RevampSubcommand::Snooze(command)) => mark_args("snooze", command),
+            Some(RevampSubcommand::Block(command)) => mark_args("block", command),
+            Some(RevampSubcommand::Resume(command)) => mark_args("resume", command),
+            Some(RevampSubcommand::Nudge(command)) => {
+                let mut args = vec!["nudge".to_string()];
+                command.append(&mut args);
+                args
+            }
+            Some(RevampSubcommand::Summary) => vec!["summary".to_string()],
+            Some(RevampSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl StatusArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(StatusSubcommand::List(filter)) => filter_args("list", filter),
+            Some(StatusSubcommand::Inspect(slot)) => slot_command_args("inspect", slot),
+            Some(StatusSubcommand::Worktrees) => vec!["worktrees".to_string()],
+            Some(StatusSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+impl CapArgs {
+    fn into_args(self) -> Vec<String> {
+        match self.command {
+            Some(CapSubcommand::Check) => vec!["check".to_string()],
+            Some(CapSubcommand::External(args)) => args,
+            None => Vec::new(),
+        }
+    }
+}
+
+fn slot_command_args(command: &str, slot: SlotRefArgs) -> Vec<String> {
+    let mut args = vec![command.to_string()];
+    slot.append_flag_or_value(&mut args);
+    args
+}
+
+fn filter_args(command: &str, filter: FilterArgs) -> Vec<String> {
+    let mut args = vec![command.to_string()];
+    push_optional(&mut args, "--class", &filter.class_filter);
+    push_optional(&mut args, "--status", &filter.status);
+    args
+}
+
+fn mark_args(command: &str, mark: SlotMarkArgs) -> Vec<String> {
+    let mut args = vec![command.to_string()];
+    mark.append(&mut args);
+    args
+}
+
+fn push_pair(args: &mut Vec<String>, flag: &str, value: &str) {
+    args.push(flag.to_string());
+    args.push(value.to_string());
+}
+
+fn push_optional(args: &mut Vec<String>, flag: &str, value: &Option<String>) {
+    if let Some(value) = value {
+        push_pair(args, flag, value);
+    }
+}
+
+fn push_optional_maybe(args: &mut Vec<String>, flag: &str, value: &Option<Option<String>>) {
+    match value {
+        Some(Some(value)) => push_pair(args, flag, value),
+        Some(None) => args.push(flag.to_string()),
+        None => {}
+    }
+}
+
+fn push_present(args: &mut Vec<String>, flag: &str, present: bool) {
+    if present {
+        args.push(flag.to_string());
+    }
+}
+
+fn push_pos(args: &mut Vec<String>, value: &Option<String>) {
+    if let Some(value) = value {
+        args.push(value.clone());
+    }
+}
+
 fn main() {
     if let Err(err) = run(std::env::args_os().skip(1).collect()) {
-        eprintln!("maeh error: {err}");
-        std::process::exit(1);
+        match err {
+            MaehError::Clap(err) => {
+                let _ = err.print();
+                std::process::exit(err.exit_code());
+            }
+            err => {
+                eprintln!("maeh error: {err}");
+                std::process::exit(1);
+            }
+        }
     }
 }
 
 fn run(args: Vec<OsString>) -> Result<()> {
-    let mut args = args
-        .into_iter()
-        .map(|arg| arg.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-    if args.is_empty() {
-        print_concise_help();
-        return Ok(());
-    }
-    if args.first().is_some_and(|arg| is_help_arg(arg)) {
-        print_help();
-        return Ok(());
-    }
-    if args.first().is_some_and(|arg| is_version_arg(arg)) {
-        print_version();
-        return Ok(());
-    }
-    let home = if args.first().is_some_and(|arg| arg == "--home") {
-        args.remove(0);
-        PathBuf::from(take_arg(&mut args, "home path")?)
-    } else {
-        resolve_home()?
+    let cli = Cli::try_parse_from(std::iter::once(OsString::from("maeh")).chain(args))?;
+    let home = match cli.home {
+        Some(home) => home,
+        None => resolve_home()?,
     };
-    if args.is_empty() {
-        print_concise_help();
-        return Ok(());
-    }
-    if args.first().is_some_and(|arg| is_help_arg(arg)) {
-        print_help();
-        return Ok(());
-    }
-    if args.first().is_some_and(|arg| is_version_arg(arg)) {
-        print_version();
-        return Ok(());
-    }
-    dispatch(&home, &mut args)
-}
-
-fn dispatch(home: &Path, args: &mut Vec<String>) -> Result<()> {
-    let command = take_arg(args, "command")?;
-    if has_help_arg(args) {
-        if print_command_help(&command) {
-            return Ok(());
+    match cli.command {
+        Some(command) => command.dispatch(&home),
+        None => {
+            print_concise_help();
+            Ok(())
         }
-        return Err(MaehError::Usage(format!("unknown command {command}")));
     }
-    match command.as_str() {
-        "init" => init(home),
-        "config" => config_command(home, args),
-        "ledger" => ledger_command(home, args),
-        "state" => state_command(home, args),
-        "board-cache" => board_cache_command(home, args),
-        "capsule" => capsule_command(home, args),
-        "prompt" => prompt_command(args),
-        "backend" => backend_command(home, args),
-        "worktree" => worktree_command(home, args),
-        "workspace" => workspace_command(home, args),
-        "spawn" => spawn_command(home, args),
-        "agent" => agent_command(home, args),
-        "kickoff" => kickoff_command(home, args),
-        "verify" => verify_command(home, args),
-        "slot" => slot_command(home, args),
-        "cleanup" => cleanup_command(home, args),
-        "revamp" => revamp_command(home, args),
-        "status" => status_command(home, args),
-        "cap" => cap_command(home, args),
-        "statusline" => statusline(home),
-        "work-hours" => work_hours(home),
-        "doctor" => doctor(home),
-        "selftest" => selftest(home),
-        other => Err(MaehError::Usage(format!("unknown command {other}"))),
-    }
-}
-
-fn is_help_arg(arg: &str) -> bool {
-    matches!(arg, "--help" | "-h")
-}
-
-fn is_version_arg(arg: &str) -> bool {
-    matches!(arg, "--version" | "-V")
-}
-
-fn has_help_arg(args: &[String]) -> bool {
-    args.iter().any(|arg| is_help_arg(arg))
-}
-
-fn print_version() {
-    println!("maeh {}", env!("CARGO_PKG_VERSION"));
 }
 
 fn print_concise_help() {
@@ -233,765 +1412,6 @@ fn print_concise_help() {
     println!(
         "Run `maeh --help` for the full command list and `maeh <command> --help` for details."
     );
-}
-
-fn print_help() {
-    println!("Typed orchestration CLI for hmph and Herdr agents");
-    println!();
-    println!("Usage:");
-    println!("  maeh [GLOBAL OPTIONS] <command> [ARGS]");
-    println!("  maeh <command> --help");
-    println!();
-    println!("Examples:");
-    println!("  maeh init");
-    println!("  maeh backend list-task-slots");
-    println!("  maeh prompt kickoff --url <task-url>");
-    println!("  maeh doctor");
-    println!();
-    println!("Global options:");
-    println!("  -h, --help       print help");
-    println!("  -V, --version    print version");
-    println!("  --home PATH      use alternate state directory");
-    println!();
-    println!("Commands:");
-    print_command_rows(COMMANDS);
-    println!();
-    println!("Notes:");
-    println!("  Outputs are stable, line-oriented, and safe for humans and agents to parse.");
-    println!("  Prefer plan/list/inspect commands; live backend mutations require --exec.");
-    println!("  Success output goes to stdout; errors and diagnostics go to stderr.");
-    println!("  Run `maeh <command> --help` for command-specific usage, options, and examples.");
-}
-
-fn print_command_rows(rows: &[(&str, &str)]) {
-    for (name, description) in rows {
-        println!("  {name:<13} {description}");
-    }
-}
-
-fn print_rows(rows: &[(&str, &str)]) {
-    for (name, description) in rows {
-        println!("  {name:<28} {description}");
-    }
-}
-
-fn print_lines(lines: &[&str]) {
-    for line in lines {
-        println!("  {line}");
-    }
-}
-
-fn print_help_page(
-    title: &str,
-    description: &[&str],
-    usage: &[&str],
-    actions: &[(&str, &str)],
-    options: &[(&str, &str)],
-    examples: &[&str],
-    notes: &[&str],
-) {
-    println!("{title}");
-    if !description.is_empty() {
-        println!();
-        println!("Description:");
-        print_lines(description);
-    }
-    println!();
-    println!("Usage:");
-    print_lines(usage);
-    if !actions.is_empty() {
-        println!();
-        println!("Subcommands:");
-        print_rows(actions);
-    }
-    if !options.is_empty() {
-        println!();
-        println!("Options:");
-        print_rows(options);
-    }
-    if !examples.is_empty() {
-        println!();
-        println!("Examples:");
-        print_lines(examples);
-    }
-    if !notes.is_empty() {
-        println!();
-        println!("Notes:");
-        print_lines(notes);
-    }
-}
-
-fn print_command_help(command: &str) -> bool {
-    match command {
-        "init" => {
-            print_help_page(
-                "maeh init",
-                &[
-                    "Create the maeh home directory layout and default config.toml.",
-                    "Safe to rerun; existing config is left unchanged.",
-                ],
-                &["maeh init"],
-                &[],
-                &[],
-                &["maeh init", "MAEH_HOME=/tmp/maeh maeh init"],
-                &[
-                    "Creates ledger, board-cache, and task-capsules directories.",
-                    "Uses --home, MAEH_HOME, persisted default home, or HOME/.maeh for the state root.",
-                ],
-            );
-            true
-        }
-        "config" => {
-            print_help_page(
-                "maeh config",
-                &[
-                    "Inspect maeh configuration and export effective values for shell helpers.",
-                    "show and emit apply supported MAEH_* environment overrides before printing.",
-                ],
-                &["maeh config <path|show|emit|set-home>"],
-                &[
-                    ("path", "print the config.toml path for the active home"),
-                    ("show", "print the effective human-readable config"),
-                    ("emit", "print shell-friendly MAEH_* key/value lines"),
-                    ("set-home", "persist the default home in the XDG config"),
-                ],
-                &[],
-                &[
-                    "maeh config path",
-                    "maeh config show",
-                    "maeh config emit",
-                    "maeh --home ~/.claude/orchestrator config set-home",
-                ],
-                &[
-                    "Config defaults are built in; maeh can run before init creates config.toml.",
-                    "Backend and harness env vars override values read from config.toml.",
-                    "set-home writes ${MAEH_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/maeh/config.toml} so future worktrees do not need --home.",
-                ],
-            );
-            true
-        }
-        "ledger" => {
-            print_help_page(
-                "maeh ledger",
-                &[
-                    "Append and list orchestration span events stored as JSONL under the active home.",
-                    "Use this for loop bookkeeping, queued work, and handoff breadcrumbs.",
-                ],
-                &["maeh ledger <append|list> [OPTIONS]"],
-                &[
-                    (
-                        "append",
-                        "append one span row to <home>/ledger/<loop>.jsonl",
-                    ),
-                    ("list", "print rows from a loop ledger file"),
-                ],
-                &[
-                    ("--loop NAME", "ledger name; also the JSONL filename stem"),
-                    ("--event NAME", "event name for append"),
-                    ("--target VALUE", "slot, task, or object the event concerns"),
-                    ("--data JSON", "JSON payload for append; defaults to {}"),
-                ],
-                &[
-                    "maeh ledger append --loop daily --event run_start --target w1 --data '{}'",
-                    "maeh ledger list --loop daily",
-                ],
-                &[
-                    "append creates the ledger directory if needed.",
-                    "list prints timestamp, event, target, and JSON payload per row.",
-                ],
-            );
-            true
-        }
-        "state" => {
-            print_help_page(
-                "maeh state",
-                &[
-                    "Read and mutate local slot metadata in <home>/state.json.",
-                    "Slots are lightweight records used by backend, cleanup, revamp, and status commands.",
-                ],
-                &["maeh state <tag|untag|get|list|worktree|delete-slot> [ARGS]"],
-                &[
-                    ("tag", "set a key/value on a slot: tag <slot> <key> <value>"),
-                    ("untag", "remove one key from a slot: untag <slot> <key>"),
-                    ("get", "print one slot value: get <slot> <key>"),
-                    ("list", "print tab-separated slot summary rows"),
-                    ("worktree", "shortcut for get <slot> worktree"),
-                    ("delete-slot", "remove the local slot record"),
-                ],
-                &[],
-                &[
-                    "maeh state tag w1 task_url https://example/task",
-                    "maeh state get w1 task_url",
-                    "maeh state list",
-                ],
-                &[
-                    "This mutates only local maeh state; it does not close backend windows.",
-                    "Use maeh slot close --exec when backend cleanup should happen too.",
-                ],
-            );
-            true
-        }
-        "board-cache" => {
-            print_help_page(
-                "maeh board-cache",
-                &[
-                    "Cache tracker board snapshots so loops can avoid expensive repeated reads.",
-                    "Input and output are raw JSON values.",
-                ],
-                &["maeh board-cache <put|get> [OPTIONS]"],
-                &[
-                    ("put", "read JSON from stdin and store it under a cache key"),
-                    ("get", "print cached JSON when it exists and is fresh"),
-                ],
-                &[
-                    ("--key NAME", "cache key; defaults to intake"),
-                    ("--stale", "allow get to return expired cache content"),
-                ],
-                &[
-                    "maeh board-cache put --key intake < board.json",
-                    "maeh board-cache get --key intake",
-                    "maeh board-cache get --key revamp --stale",
-                ],
-                &[
-                    "The revamp key uses board_ttl_revamp_secs; all others use board_ttl_intake_secs.",
-                    "Expired cache reads fail with a cache miss unless --stale is passed.",
-                ],
-            );
-            true
-        }
-        "capsule" => {
-            print_help_page(
-                "maeh capsule",
-                &[
-                    "Store compact task context keyed by task URL.",
-                    "Capsules keep agent prompts small and avoid repeatedly fetching full tracker pages.",
-                ],
-                &["maeh capsule <put|get|prompt> <url> [OPTIONS]"],
-                &[
-                    ("put", "read JSON from stdin and cache it for a task URL"),
-                    ("get", "print cached capsule JSON"),
-                    ("prompt", "render cached capsule inside a Task capsule prompt block"),
-                ],
-                &[("--edited VALUE", "source last-edited marker; get/prompt require it to match when provided")],
-                &[
-                    "maeh capsule put https://task --edited 2025-01-01T00:00:00Z < capsule.json",
-                    "maeh capsule get https://task",
-                    "maeh capsule prompt https://task",
-                ],
-                &[
-                    "put enforces task_capsule_max_chars from config.",
-                    "A missing or stale capsule exits as a cache miss.",
-                ],
-            );
-            true
-        }
-        "prompt" => {
-            print_help_page(
-                "maeh prompt",
-                &[
-                    "Render reusable prompts for agent orchestration.",
-                    "Current output is plain text intended to paste into a primary agent pane.",
-                ],
-                &["maeh prompt <kickoff> [OPTIONS]"],
-                &[("kickoff", "render the standard kickoff prompt for a tracker task")],
-                &[
-                    ("--url URL", "task URL to include in the prompt"),
-                    ("--capsule-file PATH", "read task capsule JSON from a file instead of using {}"),
-                ],
-                &[
-                    "maeh prompt kickoff --url https://example/task",
-                    "maeh prompt kickoff --url https://example/task --capsule-file capsule.json",
-                ],
-                &[
-                    "This command only renders text; delivery is handled by kickoff or agent deliver.",
-                ],
-            );
-            true
-        }
-        "backend" => {
-            print_help_page(
-                "maeh backend",
-                &[
-                    "Inspect and reconcile live Herdr/tmux backend state with local maeh slot state.",
-                    "Dry-run plans are the default; live reads require --exec unless a fixture is supplied.",
-                ],
-                &["maeh backend <plan|discover|reconcile|list-task-slots|list-worktrees> [OPTIONS]"],
-                &[
-                    ("plan", "print the backend discovery command without running it"),
-                    ("discover", "read backend state and print normalized slot rows"),
-                    ("reconcile", "compare backend state with local state and print operations"),
-                    ("list-task-slots", "print task-oriented slot rows"),
-                    ("list-worktrees", "print locally tracked worktree rows"),
-                ],
-                &[
-                    ("--fixture PATH", "parse adapter output from a fixture file"),
-                    ("--exec", "perform the live backend read"),
-                ],
-                &[
-                    "maeh backend plan",
-                    "maeh backend discover --fixture tmux.fixture",
-                    "maeh backend reconcile --exec",
-                    "maeh backend list-task-slots",
-                ],
-                &[
-                    "--fixture and --exec are mutually exclusive.",
-                    "Selected backend resolves from config, env, and auto-detection.",
-                ],
-            );
-            true
-        }
-        "worktree" => {
-            print_help_page(
-                "maeh worktree",
-                &[
-                    "Plan or open a backend worktree/workspace without starting agents.",
-                    "Use spawn when the primary and critic panes should be launched too.",
-                ],
-                &["maeh worktree <plan|open> --slot SLOT --repo PATH --path PATH [OPTIONS]"],
-                &[
-                    ("plan", "print backend operations without mutating anything"),
-                    ("open", "execute worktree/workspace creation and persist local state"),
-                ],
-                &[
-                    ("--slot SLOT", "managed slot id"),
-                    ("--repo PATH", "source repository root"),
-                    ("--branch NAME", "branch name for the worktree"),
-                    ("--base REF", "base ref; defaults to HEAD"),
-                    ("--path PATH", "worktree checkout path"),
-                    ("--label NAME", "display label; defaults to slot"),
-                    ("--create", "create the worktree when the backend supports it"),
-                    ("--with-editor/--no-editor", "include or skip the editor pane in layout planning"),
-                    ("--focus/--no-focus", "request backend focus behavior"),
-                ],
-                &[
-                    "maeh worktree plan --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor",
-                    "maeh worktree open --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create",
-                ],
-                &[
-                    "open mutates the backend and local state; plan is read-only.",
-                    "Layout flags are passed through to the selected backend adapter.",
-                ],
-            );
-            true
-        }
-        "workspace" => {
-            print_help_page(
-                "maeh workspace",
-                &[
-                    "Register an existing backend workspace or spawn a full managed slot.",
-                    "workspace spawn is a compatibility wrapper around slot spawn defaults.",
-                ],
-                &["maeh workspace <register|spawn> [OPTIONS]"],
-                &[
-                    ("register", "persist an existing workspace, panes, worktree, and metadata"),
-                    ("spawn", "plan or execute a managed workspace plus agent spawn"),
-                ],
-                &[
-                    ("--slot SLOT", "managed slot id"),
-                    ("--workspace ID", "backend workspace/window id for register"),
-                    ("--worktree PATH", "worktree path for register; alias for --path in spawn"),
-                    ("--repo PATH", "repository path to persist"),
-                    ("--task-url URL", "tracker task URL"),
-                    ("--primary-pane ID", "primary agent pane id for register"),
-                    ("--critic-pane ID", "critic agent pane id for register"),
-                    ("--editor-pane ID", "editor pane id for register"),
-                    ("--backend KIND", "auto, herdr, or tmux"),
-                    ("--status VALUE", "initial local status for register; defaults to active"),
-                    ("--exec", "execute spawn instead of printing the plan"),
-                ],
-                &[
-                    "maeh workspace register --slot w1 --workspace ws1 --worktree /tmp/wt --repo /repo",
-                    "maeh workspace spawn --slot w1 --repo /repo --path /tmp/wt --task-url https://task --exec",
-                ],
-                &[
-                    "register mutates only local maeh state.",
-                    "spawn accepts the same worktree, layout, and agent command flags as slot spawn.",
-                ],
-            );
-            true
-        }
-        "spawn" => {
-            print_help_page(
-                "maeh spawn",
-                &[
-                    "Plan or run full slot setup: backend worktree plus primary and critic agents.",
-                    "This is the direct lower-level form used by slot spawn and workspace spawn wrappers.",
-                ],
-                &["maeh spawn <plan|run> --slot SLOT --task-url URL --repo PATH --path PATH [OPTIONS]"],
-                &[
-                    ("plan", "print backend operations without mutating anything"),
-                    ("run", "execute worktree and agent startup, then persist local state"),
-                ],
-                &[
-                    ("--task-url URL", "tracker task URL to persist on the slot"),
-                    ("--slot SLOT", "managed slot id"),
-                    ("--repo PATH", "source repository root"),
-                    ("--branch NAME", "branch name for the worktree"),
-                    ("--base REF", "base ref; defaults to HEAD"),
-                    ("--path PATH", "worktree checkout path"),
-                    ("--label NAME", "display label; defaults to slot"),
-                    ("--primary-cmd CMD", "primary agent command; defaults to config"),
-                    ("--critic-cmd CMD", "critic agent command; defaults to config"),
-                    ("--editor-cmd CMD", "editor command; defaults to config"),
-                    ("--with-editor/--no-editor", "include or skip editor pane"),
-                    ("--focus/--no-focus", "request backend focus behavior"),
-                ],
-                &[
-                    "maeh spawn plan --slot w1 --task-url https://task --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor",
-                    "maeh spawn run --slot w1 --task-url https://task --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor",
-                ],
-                &[
-                    "run mutates backend state and local maeh state.",
-                    "Use slot spawn for backend override aliases and safer default creation behavior.",
-                ],
-            );
-            true
-        }
-        "agent" => {
-            print_help_page(
-                "maeh agent",
-                &[
-                    "Deliver prompts to backend panes through the selected adapter.",
-                    "Delivery is backend-neutral and uses explicit submit/Enter operations.",
-                ],
-                &["maeh agent deliver [TARGET] [PROMPT] [OPTIONS]"],
-                &[("deliver", "plan or execute prompt delivery to a target pane or slot role")],
-                &[
-                    ("--target ID", "backend pane target; positional TARGET is also accepted"),
-                    ("--slot SLOT", "resolve target panes from a managed slot"),
-                    ("--role ROLE", "primary, critic, or both; defaults to both for slots"),
-                    ("--prompt TEXT", "prompt text to send"),
-                    ("--prompt-file PATH", "read prompt text from a file"),
-                    ("--pane-text TEXT", "pane contents to plan against without live read"),
-                    ("--pane-file PATH", "read pane contents from a file"),
-                    ("--exec", "execute delivery operations"),
-                ],
-                &[
-                    "maeh agent deliver w1:p2 \"Do the task\" --pane-text 'ready › '",
-                    "maeh agent deliver --slot w1 --role critic --prompt 'Review this' --exec",
-                ],
-                &[
-                    "Without --exec, the command prints the operations it would run.",
-                    "When --exec is used without pane text, maeh reads the live pane before planning.",
-                ],
-            );
-            true
-        }
-        "kickoff" => {
-            print_help_page(
-                "maeh kickoff",
-                &[
-                    "Plan or execute the initial prompt delivery to an agent pane.",
-                    "This uses the same delivery policy as agent deliver with plan/run naming.",
-                ],
-                &["maeh kickoff <plan|run> [TARGET] [PROMPT] [OPTIONS]"],
-                &[
-                    (
-                        "plan",
-                        "print prompt delivery operations without executing them",
-                    ),
-                    ("run", "execute prompt delivery operations"),
-                ],
-                &[
-                    (
-                        "--target ID",
-                        "backend pane target; positional TARGET is also accepted",
-                    ),
-                    ("--slot SLOT", "resolve target panes from a managed slot"),
-                    (
-                        "--role ROLE",
-                        "primary, critic, or both; defaults to both for slots",
-                    ),
-                    ("--prompt TEXT", "prompt text to send"),
-                    ("--prompt-file PATH", "read prompt text from a file"),
-                    (
-                        "--pane-text TEXT",
-                        "pane contents to plan against without live read",
-                    ),
-                    ("--pane-file PATH", "read pane contents from a file"),
-                ],
-                &[
-                    "maeh kickoff plan --target w1:p2 --prompt 'Do the task'",
-                    "maeh kickoff run --slot w1 --role primary --prompt-file kickoff.txt",
-                ],
-                &[
-                    "plan is read-only; run performs backend send operations.",
-                    "The delivery policy handles common trust/update/continue blockers safely.",
-                ],
-            );
-            true
-        }
-        "verify" => {
-            print_help_page(
-                "maeh verify",
-                &[
-                    "Verify evidence that a prompt was submitted or that a slot has required metadata.",
-                    "Use this in loop checks before considering agent startup or delivery complete.",
-                ],
-                &["maeh verify <prompt|slot> [OPTIONS]"],
-                &[
-                    ("prompt", "compare before/after pane text against a prompt"),
-                    ("slot", "verify local slot has worktree, primary pane, and critic pane"),
-                ],
-                &[
-                    ("--before TEXT", "pane text before delivery"),
-                    ("--before-file PATH", "read before text from a file"),
-                    ("--after TEXT", "pane text after delivery"),
-                    ("--after-file PATH", "read after text from a file"),
-                    ("--prompt TEXT", "prompt text that should have been submitted"),
-                    ("--prompt-file PATH", "read prompt text from a file"),
-                    ("--slot SLOT", "slot id for verify slot; positional slot is also accepted"),
-                ],
-                &[
-                    "maeh verify prompt --before '› Do it' --after 'Working' --prompt 'Do it'",
-                    "maeh verify slot w1",
-                ],
-                &[
-                    "prompt verification prints changed/submitted booleans and prompt head.",
-                    "slot verification checks local state only; it does not query the backend.",
-                ],
-            );
-            true
-        }
-        "slot" => {
-            print_help_page(
-                "maeh slot",
-                &[
-                    "List, inspect, classify, spawn, and mutate managed slot lifecycle state.",
-                    "This is the primary operator surface for cleanup, revamp, and active work management.",
-                ],
-                &["maeh slot <spawn|verify|close|list|inspect|classify|snooze|block|resume|review|nudge|remove-worktree|worktree-remove|count> [OPTIONS]"],
-                &[
-                    ("spawn", "plan or execute a managed workspace plus agents"),
-                    ("verify", "verify required local slot metadata"),
-                    ("close", "plan or execute backend workspace/window close"),
-                    ("list", "print tab-separated slot rows"),
-                    ("inspect", "print all metadata for one slot"),
-                    ("classify", "print one slot's lifecycle class"),
-                    ("snooze", "mark a slot snoozed or another requested status"),
-                    ("block", "mark a slot blocked with optional reason"),
-                    ("resume", "mark a slot active and clear snooze/block fields"),
-                    ("review", "mark a slot ready for review"),
-                    ("nudge", "record a nudge or deliver a prompt to a slot role"),
-                    ("remove-worktree", "plan or execute git worktree removal"),
-                    ("worktree-remove", "alias for remove-worktree"),
-                    ("count", "count slots matching class/status filters"),
-                ],
-                &[
-                    ("--slot SLOT", "slot id; many commands also accept positional slot"),
-                    ("--class CLASS", "list/count class filter; defaults vary by wrapper"),
-                    ("--status LIST", "comma-separated status filter or requested status"),
-                    ("--days N", "snooze until now + N days"),
-                    ("--until EPOCH", "snooze-until epoch"),
-                    ("--reason TEXT", "block reason"),
-                    ("--prompt TEXT", "nudge prompt to deliver"),
-                    ("--role ROLE", "primary, critic, or both for prompt delivery"),
-                    ("--plan", "force planning mode for close/remove-worktree"),
-                    ("--exec", "execute backend/git mutation when supported"),
-                    ("--pull-main", "pull origin main before worktree removal"),
-                ],
-                &[
-                    "maeh slot list --class done",
-                    "maeh slot inspect w1",
-                    "maeh slot snooze w1 --days 1 --status blocked",
-                    "maeh slot close w1 --exec",
-                    "maeh slot worktree-remove w1 --plan --pull-main",
-                ],
-                &[
-                    "Lifecycle state changes mutate local maeh state and append ledger rows.",
-                    "close and worktree removal require --exec to perform backend/git mutations.",
-                ],
-            );
-            true
-        }
-        "cleanup" => {
-            print_help_page(
-                "maeh cleanup",
-                &[
-                    "Cleanup-focused wrappers around slot list, inspect, close, and summary.",
-                    "Defaults are tuned for done slots so cleanup loops do not need to repeat filters.",
-                ],
-                &["maeh cleanup <list|inspect|close|summary> [OPTIONS]"],
-                &[
-                    ("list", "list slots; defaults to --class done"),
-                    ("inspect", "inspect one slot"),
-                    ("close", "plan or execute backend close for one slot"),
-                    ("summary", "print counts by lifecycle class"),
-                ],
-                &[
-                    ("--slot SLOT", "slot id; inspect/close also accept positional slot"),
-                    ("--class CLASS", "override list class filter"),
-                    ("--status LIST", "comma-separated status filter"),
-                    ("--plan", "force planning mode for close"),
-                    ("--exec", "execute backend close"),
-                ],
-                &[
-                    "maeh cleanup list",
-                    "maeh cleanup inspect --slot done-slot",
-                    "maeh cleanup close done-slot --exec",
-                    "maeh cleanup summary",
-                ],
-                &[
-                    "summary reads local state only.",
-                    "close delegates to the same implementation as maeh slot close.",
-                ],
-            );
-            true
-        }
-        "revamp" => {
-            print_help_page(
-                "maeh revamp",
-                &[
-                    "Stale-work wrappers for inspecting, snoozing, blocking, resuming, and nudging slots.",
-                    "Defaults are tuned for revamp loops that re-engage quiet unfinished work.",
-                ],
-                &["maeh revamp <list|inspect|snooze|block|resume|nudge|summary> [OPTIONS]"],
-                &[
-                    ("list", "list stale slots by default"),
-                    ("inspect", "inspect one slot"),
-                    ("snooze", "mark one slot snoozed or requested status"),
-                    ("block", "mark one slot blocked"),
-                    ("resume", "mark one slot active"),
-                    ("nudge", "record a nudge or deliver a prompt"),
-                    ("summary", "print counts by lifecycle class"),
-                ],
-                &[
-                    ("--slot SLOT", "slot id; most commands also accept positional slot"),
-                    ("--class CLASS", "override list class filter; defaults to stale"),
-                    ("--status LIST", "status filter or requested status"),
-                    ("--days N", "snooze until now + N days"),
-                    ("--until EPOCH", "snooze-until epoch"),
-                    ("--reason TEXT", "block reason"),
-                    ("--prompt TEXT", "nudge prompt to deliver"),
-                    ("--role ROLE", "primary, critic, or both for prompt delivery"),
-                ],
-                &[
-                    "maeh revamp list",
-                    "maeh revamp inspect w1",
-                    "maeh revamp block w1 --reason 'waiting on review'",
-                    "maeh revamp nudge w1 --role primary --prompt 'Please continue'",
-                ],
-                &[
-                    "list uses a 24h stale threshold by default.",
-                    "Mutation commands delegate to slot lifecycle implementations.",
-                ],
-            );
-            true
-        }
-        "status" => {
-            print_help_page(
-                "maeh status",
-                &[
-                    "Print backend-aware local status reports for slots and worktrees.",
-                    "Use statusline for a shorter prompt/status-bar friendly summary.",
-                ],
-                &["maeh status <list|inspect|worktrees> [OPTIONS]"],
-                &[
-                    ("list", "print tab-separated slot status rows"),
-                    ("inspect", "print all metadata for one slot"),
-                    ("worktrees", "print locally tracked worktree rows"),
-                ],
-                &[
-                    ("--slot SLOT", "slot id for inspect; positional slot is also accepted"),
-                    ("--class CLASS", "list class filter; defaults to all"),
-                    ("--status LIST", "comma-separated status filter"),
-                ],
-                &["maeh status list", "maeh status inspect w1", "maeh status worktrees"],
-                &[
-                    "Reports are based on local state; use backend discover/reconcile for live backend reads.",
-                ],
-            );
-            true
-        }
-        "cap" => {
-            print_help_page(
-                "maeh cap",
-                &[
-                    "Check active work and review counts against configured caps.",
-                    "Useful before dispatching more orchestrated work.",
-                ],
-                &["maeh cap <check>"],
-                &[(
-                    "check",
-                    "print work/review counts and whether work capacity remains",
-                )],
-                &[],
-                &["maeh cap check"],
-                &[
-                    "Active, blocked, and snoozed slots count against the work cap.",
-                    "Review-status slots count against the review cap.",
-                ],
-            );
-            true
-        }
-        "statusline" => {
-            print_help_page(
-                "maeh statusline",
-                &[
-                    "Print a compact single-line pool summary for prompts or shell status bars.",
-                    "The line includes work and review counts against configured caps.",
-                ],
-                &["maeh statusline"],
-                &[],
-                &[],
-                &["maeh statusline"],
-                &["Active and blocked slots count as work; review slots count as review."],
-            );
-            true
-        }
-        "work-hours" => {
-            print_help_page(
-                "maeh work-hours",
-                &[
-                    "Evaluate whether the current local day/hour is inside configured work hours.",
-                    "Loops can use this as a guard before dispatching non-urgent work.",
-                ],
-                &["maeh work-hours"],
-                &[],
-                &[],
-                &["maeh work-hours", "MAEH_DOW=1 MAEH_HOUR=10 maeh work-hours"],
-                &[
-                    "MAEH_DOW and MAEH_HOUR override the current time for tests and dry runs.",
-                    "Configured workdays use ISO weekday numbers where Monday is 1.",
-                ],
-            );
-            true
-        }
-        "doctor" => {
-            print_help_page(
-                "maeh doctor",
-                &[
-                    "Print diagnostic state for paths, config, backend selection, Herdr detection, and debug mode.",
-                    "Use this first when maeh behaves differently across machines or shells.",
-                ],
-                &["maeh doctor"],
-                &[],
-                &[],
-                &["maeh doctor", "MAEH_DEBUG=1 maeh doctor"],
-                &[
-                    "doctor is read-only and does not create missing state directories.",
-                    "Herdr detection comes from HERDR_ENV or HERDR_SOCKET_PATH.",
-                ],
-            );
-            true
-        }
-        "selftest" => {
-            print_help_page(
-                "maeh selftest",
-                &[
-                    "Validate that effective config and local state can be read.",
-                    "This is a minimal local health check for scripts and release checks.",
-                ],
-                &["maeh selftest"],
-                &[],
-                &[],
-                &["maeh selftest"],
-                &["selftest reads config and state only; it does not query backend tools."],
-            );
-            true
-        }
-        _ => false,
-    }
 }
 
 fn take_arg(args: &mut Vec<String>, name: &str) -> Result<String> {
@@ -1417,8 +1837,6 @@ fn slot_spawn_with_label(home: &Path, label: &str, args: &mut Vec<String>) -> Re
         "" => {}
         value => config.backend = value.parse()?,
     }
-    alias_flag(args, "--repo-root", "--repo");
-    alias_flag(args, "--worktree", "--path");
     if !args.iter().any(|arg| arg == "--slot") {
         let default_slot = flag_value(args, "--label", "")?;
         if !default_slot.is_empty() {
@@ -2292,15 +2710,6 @@ fn settings_for_entry(
         settings.selected = kind.resolve(&env);
     }
     Ok(settings)
-}
-
-fn alias_flag(args: &mut [String], old: &str, new: &str) {
-    if args.iter().any(|arg| arg == new) {
-        return;
-    }
-    if let Some(arg) = args.iter_mut().find(|arg| arg.as_str() == old) {
-        *arg = new.to_string();
-    }
 }
 
 fn ledger_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
