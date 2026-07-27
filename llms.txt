@@ -15,7 +15,7 @@
 - Prefer read-only context commands first: `plan`, `list`, `inspect`, `verify`, `status`, `doctor`, `selftest`.
 - Treat commands with `--exec`, `open`, `run`, `close`, or `worktree-remove` as mutating backend actions.
 - Outputs are stable plain text and intentionally asserted in tests; parse exact rows instead of scraping prose.
-- Use `MAEH_HOME` or `--home PATH` to isolate local state in tests or agent sandboxes.
+- Use `maeh --home PATH config set-home` for a stable default home; use `MAEH_HOME` or `--home PATH` for one-off isolation.
 
 ## Key surfaces
 

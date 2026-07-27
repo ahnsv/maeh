@@ -58,6 +58,12 @@ maeh --help
 maeh doctor
 ```
 
+Persist a non-default state root once so later worktree invocations do not need `--home`:
+
+```bash
+maeh --home ~/.claude/orchestrator config set-home
+```
+
 If `maeh` installs successfully but your shell cannot find it, add the install directory to `PATH`:
 
 ```bash

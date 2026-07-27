@@ -11,7 +11,7 @@ Build `maeh`, a Rust CLI that turns the hmph/Herdr shell-helper workflow into a 
    - GitHub Actions CI for formatting, clippy, tests, and 100% line/function coverage.
    - GitHub Actions release workflow for tag builds and binary artifacts.
 2. Local orchestration state
-   - `init` creates config, ledger, board-cache, and task-capsule directories under `MAEH_HOME` or `~/.maeh`.
+   - `init` creates config, ledger, board-cache, and task-capsule directories under `--home`, `MAEH_HOME`, the persisted default home, or `~/.maeh`.
    - `state tag|untag|get|list|worktree|delete-slot` replaces deterministic Herdr sidecar state operations needed by hmph loops.
    - `statusline` reports work/review pool counts from managed slot state.
 3. Ledger and cache helpers
@@ -24,6 +24,7 @@ Build `maeh`, a Rust CLI that turns the hmph/Herdr shell-helper workflow into a 
    - `work-hours` evaluates the configured work-hour guard.
    - `selftest` validates local config/state readability.
 5. Backend reconciliation and live orchestration seam
+   - `config set-home` persists a default state root in `${MAEH_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/maeh/config.toml}` so worktree-local invocations do not need `--home`.
    - `backend` config is typed as `auto|herdr|tmux`; `MAEH_BACKEND`, `MAEH_HERDR_BIN`, `MAEH_TMUX_BIN`, and `MAEH_TMUX_SESSION` are the env override boundary.
    - `backend plan|discover|reconcile` normalizes tmux format output or Herdr JSON snapshots into shared slot records using fixtures or explicit `--exec`.
    - `backend list-task-slots` emits the stable skills contract: `slot task_url status snooze_until age_secs label primary_pane critic_pane worktree`.

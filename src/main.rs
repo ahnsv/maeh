@@ -72,6 +72,12 @@ const COMMANDS: &[(&str, &str)] = &[
     ("selftest", "validate config/state readability"),
 ];
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+struct DefaultConfig {
+    home: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 struct Config {
@@ -146,7 +152,7 @@ fn run(args: Vec<OsString>) -> Result<()> {
         args.remove(0);
         PathBuf::from(take_arg(&mut args, "home path")?)
     } else {
-        resolve_home()
+        resolve_home()?
     };
     if args.is_empty() {
         print_concise_help();
@@ -245,7 +251,7 @@ fn print_help() {
     println!("Global options:");
     println!("  -h, --help       print help");
     println!("  -V, --version    print version");
-    println!("  --home PATH      use alternate state directory (defaults to MAEH_HOME or ~/.maeh)");
+    println!("  --home PATH      use alternate state directory");
     println!();
     println!("Commands:");
     print_command_rows(COMMANDS);
@@ -330,7 +336,7 @@ fn print_command_help(command: &str) -> bool {
                 &["maeh init", "MAEH_HOME=/tmp/maeh maeh init"],
                 &[
                     "Creates ledger, board-cache, and task-capsules directories.",
-                    "Uses MAEH_HOME, HOME/.maeh, or --home PATH for the state root.",
+                    "Uses --home, MAEH_HOME, persisted default home, or HOME/.maeh for the state root.",
                 ],
             );
             true
@@ -342,17 +348,24 @@ fn print_command_help(command: &str) -> bool {
                     "Inspect maeh configuration and export effective values for shell helpers.",
                     "show and emit apply supported MAEH_* environment overrides before printing.",
                 ],
-                &["maeh config <path|show|emit>"],
+                &["maeh config <path|show|emit|set-home>"],
                 &[
                     ("path", "print the config.toml path for the active home"),
                     ("show", "print the effective human-readable config"),
                     ("emit", "print shell-friendly MAEH_* key/value lines"),
+                    ("set-home", "persist the default home in the XDG config"),
                 ],
                 &[],
-                &["maeh config path", "maeh config show", "maeh config emit"],
+                &[
+                    "maeh config path",
+                    "maeh config show",
+                    "maeh config emit",
+                    "maeh --home ~/.claude/orchestrator config set-home",
+                ],
                 &[
                     "Config defaults are built in; maeh can run before init creates config.toml.",
                     "Backend and harness env vars override values read from config.toml.",
+                    "set-home writes ${MAEH_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/maeh/config.toml} so future worktrees do not need --home.",
                 ],
             );
             true
@@ -361,7 +374,7 @@ fn print_command_help(command: &str) -> bool {
             print_help_page(
                 "maeh ledger",
                 &[
-                    "Append and list orchestration span events stored as JSONL under MAEH_HOME.",
+                    "Append and list orchestration span events stored as JSONL under the active home.",
                     "Use this for loop bookkeeping, queued work, and handoff breadcrumbs.",
                 ],
                 &["maeh ledger <append|list> [OPTIONS]"],
@@ -1011,14 +1024,84 @@ fn flag_present(args: &mut Vec<String>, flag: &str) -> bool {
     }
 }
 
-fn resolve_home() -> PathBuf {
+fn resolve_home() -> Result<PathBuf> {
     if let Some(home) = std::env::var_os("MAEH_HOME") {
-        return PathBuf::from(home);
+        return Ok(PathBuf::from(home));
+    }
+    if let Some(home) = default_home()? {
+        return Ok(home);
     }
     if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join(".maeh");
+        return Ok(PathBuf::from(home).join(".maeh"));
     }
-    PathBuf::from(".maeh")
+    Ok(PathBuf::from(".maeh"))
+}
+
+fn default_config_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("MAEH_CONFIG") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("XDG_CONFIG_HOME") {
+        return PathBuf::from(home).join("maeh").join("config.toml");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home)
+            .join(".config")
+            .join("maeh")
+            .join("config.toml");
+    }
+    PathBuf::from(".config/maeh/config.toml")
+}
+
+fn default_home() -> Result<Option<PathBuf>> {
+    let path = default_config_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+    let config: DefaultConfig = toml::from_str(&fs::read_to_string(&path)?)?;
+    Ok(config.home.map(|home| configured_path(&path, &home)))
+}
+
+fn configured_path(config: &Path, value: &str) -> PathBuf {
+    let path = expand_home(value);
+    if path.is_absolute() {
+        path
+    } else {
+        config.parent().unwrap_or(Path::new(".")).join(path)
+    }
+}
+
+fn expand_home(value: &str) -> PathBuf {
+    if value == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home);
+        }
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(value)
+}
+
+fn absolute_path(path: &Path) -> Result<PathBuf> {
+    let path = expand_home(&display(path));
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(std::env::current_dir()?.join(path))
+    }
+}
+
+fn write_default_home(home: &Path) -> Result<()> {
+    let config = DefaultConfig {
+        home: Some(display(&absolute_path(home)?)),
+    };
+    write_file(
+        &default_config_path(),
+        toml::to_string_pretty(&config)?.as_bytes(),
+    )
 }
 
 fn config_path(home: &Path) -> PathBuf {
@@ -1065,9 +1148,23 @@ fn config_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
             println!("{}", display(&config_path(home)));
             Ok(())
         }
+        "set-home" => set_default_home(home, args),
         "show" => show_config(home),
         other => Err(MaehError::Usage(format!("unknown config command {other}"))),
     }
+}
+
+fn set_default_home(home: &Path, args: &mut Vec<String>) -> Result<()> {
+    let selected = if args.is_empty() {
+        home.to_path_buf()
+    } else {
+        PathBuf::from(take_arg(args, "home path")?)
+    };
+    let selected = absolute_path(&selected)?;
+    write_default_home(&selected)?;
+    println!("default home: {}", display(&selected));
+    println!("default config: {}", display(&default_config_path()));
+    Ok(())
 }
 
 fn read_config(home: &Path) -> Result<Config> {
