@@ -9,7 +9,9 @@ use tempfile::TempDir;
 
 fn maeh() -> Command {
     let mut cmd = Command::cargo_bin("maeh").expect("binary exists");
-    cmd.env_remove("MAEH_HOME")
+    let default_config = TempDir::new().unwrap().path().join("config.toml");
+    cmd.env("MAEH_CONFIG", default_config)
+        .env_remove("MAEH_HOME")
         .env_remove("MAEH_NOW")
         .env_remove("MAEH_EPOCH")
         .env_remove("MAEH_DEBUG")
@@ -163,7 +165,7 @@ fn help_version_and_command_help_cover_existing_commands() {
     }
 
     let expected_subcommands: &[(&str, &[&str])] = &[
-        ("config", &["path", "show", "emit"]),
+        ("config", &["path", "show", "emit", "set-home"]),
         ("ledger", &["append", "list"]),
         (
             "state",
@@ -507,6 +509,151 @@ fn init_config_show_doctor_and_home_resolution() {
         .success()
         .stdout(format!("{}/.maeh/config.toml\n", fake_home.display()));
     maeh()
+        .env_remove("HOME")
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(".maeh/config.toml\n");
+
+    let default_config = temp.path().join("maeh-default.toml");
+    let cwd = temp.path().join("cwd");
+    let other_cwd = temp.path().join("other-cwd");
+    fs::create_dir_all(&cwd).unwrap();
+    fs::create_dir_all(&other_cwd).unwrap();
+    let cwd = cwd.canonicalize().unwrap();
+    let other_cwd = other_cwd.canonicalize().unwrap();
+    let persisted_home = cwd.join("state");
+    maeh()
+        .current_dir(&cwd)
+        .env("MAEH_CONFIG", &default_config)
+        .arg("--home")
+        .arg("state")
+        .args(["config", "set-home"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "default home: {0}\ndefault config: {1}\n",
+            persisted_home.display(),
+            default_config.display()
+        ));
+    maeh()
+        .current_dir(&other_cwd)
+        .env("MAEH_CONFIG", &default_config)
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(format!(
+            "maeh\n  created: {0}\n  config: {0}/config.toml\n  ledger: {0}/ledger\n",
+            persisted_home.display()
+        ));
+    maeh()
+        .current_dir(&other_cwd)
+        .env("MAEH_CONFIG", &default_config)
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(format!("{}/config.toml\n", persisted_home.display()));
+    maeh()
+        .env("MAEH_CONFIG", &default_config)
+        .env("MAEH_HOME", temp.path().join("env-home"))
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(format!("{}/env-home/config.toml\n", temp.path().display()));
+    maeh()
+        .env("MAEH_CONFIG", &default_config)
+        .arg("--home")
+        .arg(temp.path().join("flag-home"))
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(format!("{}/flag-home/config.toml\n", temp.path().display()));
+
+    maeh()
+        .env("MAEH_CONFIG", &default_config)
+        .args(["config", "set-home"])
+        .arg(temp.path().join("arg-home"))
+        .assert()
+        .success()
+        .stdout(format!(
+            "default home: {0}/arg-home\ndefault config: {0}/maeh-default.toml\n",
+            temp.path().display()
+        ));
+
+    let relative_config = temp.path().join("relative.toml");
+    fs::write(&relative_config, "home = 'state'\n").unwrap();
+    maeh()
+        .current_dir(&other_cwd)
+        .env("MAEH_CONFIG", &relative_config)
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(format!("{}/state/config.toml\n", temp.path().display()));
+
+    let fake_home = temp.path().join("fake-home");
+    let tilde_config = temp.path().join("tilde.toml");
+    fs::write(&tilde_config, "home = '~'\n").unwrap();
+    maeh()
+        .env("MAEH_CONFIG", &tilde_config)
+        .env("HOME", &fake_home)
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(format!("{}/config.toml\n", fake_home.display()));
+    fs::write(&tilde_config, "home = '~/orch'\n").unwrap();
+    maeh()
+        .env("MAEH_CONFIG", &tilde_config)
+        .env("HOME", &fake_home)
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(format!("{}/orch/config.toml\n", fake_home.display()));
+    fs::write(&tilde_config, "home = '~'\n").unwrap();
+    maeh()
+        .env("MAEH_CONFIG", &tilde_config)
+        .env_remove("HOME")
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(format!("{}/~/config.toml\n", temp.path().display()));
+    fs::write(&tilde_config, "home = '~/orch'\n").unwrap();
+    maeh()
+        .env("MAEH_CONFIG", &tilde_config)
+        .env_remove("HOME")
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(format!("{}/~/orch/config.toml\n", temp.path().display()));
+
+    let xdg_config = temp.path().join("xdg");
+    maeh()
+        .env_remove("MAEH_CONFIG")
+        .env("XDG_CONFIG_HOME", &xdg_config)
+        .args(["config", "set-home"])
+        .arg(temp.path().join("xdg-home"))
+        .assert()
+        .success()
+        .stdout(format!(
+            "default home: {0}/xdg-home\ndefault config: {0}/xdg/maeh/config.toml\n",
+            temp.path().display()
+        ));
+    maeh()
+        .env_remove("MAEH_CONFIG")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("HOME", &fake_home)
+        .args(["config", "set-home"])
+        .arg(temp.path().join("home-default"))
+        .assert()
+        .success()
+        .stdout(format!(
+            "default home: {0}/home-default\ndefault config: {1}/.config/maeh/config.toml\n",
+            temp.path().display(),
+            fake_home.display()
+        ));
+    maeh()
+        .current_dir(&other_cwd)
+        .env_remove("MAEH_CONFIG")
+        .env_remove("XDG_CONFIG_HOME")
         .env_remove("HOME")
         .args(["config", "path"])
         .assert()

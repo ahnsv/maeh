@@ -43,6 +43,12 @@ enum MaehError {
 type Result<T> = std::result::Result<T, MaehError>;
 type State = BTreeMap<String, BTreeMap<String, String>>;
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+struct DefaultConfig {
+    home: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 struct Config {
@@ -101,7 +107,7 @@ struct Cli {
         long,
         value_name = "PATH",
         global = true,
-        help = "Use alternate state directory (defaults to MAEH_HOME or ~/.maeh)"
+        help = "Use alternate state directory"
     )]
     home: Option<PathBuf>,
     #[command(subcommand)]
@@ -174,8 +180,16 @@ enum ConfigSubcommand {
     Show,
     #[command(about = "Print shell-friendly MAEH_* key/value lines")]
     Emit,
+    #[command(about = "Persist the default home in the XDG config")]
+    SetHome(ConfigSetHomeArgs),
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Args, Debug)]
+struct ConfigSetHomeArgs {
+    #[arg(value_name = "PATH", allow_hyphen_values = true)]
+    path: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -841,6 +855,11 @@ impl ConfigArgs {
             Some(ConfigSubcommand::Path) => "path".to_string(),
             Some(ConfigSubcommand::Show) => "show".to_string(),
             Some(ConfigSubcommand::Emit) => "emit".to_string(),
+            Some(ConfigSubcommand::SetHome(command)) => {
+                let mut args = vec!["set-home".to_string()];
+                push_pos(&mut args, &command.path);
+                return args;
+            }
             Some(ConfigSubcommand::External(args)) => return args,
             None => return Vec::new(),
         }]
@@ -1368,7 +1387,10 @@ fn main() {
 
 fn run(args: Vec<OsString>) -> Result<()> {
     let cli = Cli::try_parse_from(std::iter::once(OsString::from("maeh")).chain(args))?;
-    let home = cli.home.unwrap_or_else(resolve_home);
+    let home = match cli.home {
+        Some(home) => home,
+        None => resolve_home()?,
+    };
     match cli.command {
         Some(command) => command.dispatch(&home),
         None => {
@@ -1422,14 +1444,84 @@ fn flag_present(args: &mut Vec<String>, flag: &str) -> bool {
     }
 }
 
-fn resolve_home() -> PathBuf {
+fn resolve_home() -> Result<PathBuf> {
     if let Some(home) = std::env::var_os("MAEH_HOME") {
-        return PathBuf::from(home);
+        return Ok(PathBuf::from(home));
+    }
+    if let Some(home) = default_home()? {
+        return Ok(home);
     }
     if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join(".maeh");
+        return Ok(PathBuf::from(home).join(".maeh"));
     }
-    PathBuf::from(".maeh")
+    Ok(PathBuf::from(".maeh"))
+}
+
+fn default_config_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("MAEH_CONFIG") {
+        return PathBuf::from(path);
+    }
+    if let Some(home) = std::env::var_os("XDG_CONFIG_HOME") {
+        return PathBuf::from(home).join("maeh").join("config.toml");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home)
+            .join(".config")
+            .join("maeh")
+            .join("config.toml");
+    }
+    PathBuf::from(".config/maeh/config.toml")
+}
+
+fn default_home() -> Result<Option<PathBuf>> {
+    let path = default_config_path();
+    if !path.exists() {
+        return Ok(None);
+    }
+    let config: DefaultConfig = toml::from_str(&fs::read_to_string(&path)?)?;
+    Ok(config.home.map(|home| configured_path(&path, &home)))
+}
+
+fn configured_path(config: &Path, value: &str) -> PathBuf {
+    let path = expand_home(value);
+    if path.is_absolute() {
+        path
+    } else {
+        config.parent().unwrap_or(Path::new(".")).join(path)
+    }
+}
+
+fn expand_home(value: &str) -> PathBuf {
+    if value == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home);
+        }
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(value)
+}
+
+fn absolute_path(path: &Path) -> Result<PathBuf> {
+    let path = expand_home(&display(path));
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(std::env::current_dir()?.join(path))
+    }
+}
+
+fn write_default_home(home: &Path) -> Result<()> {
+    let config = DefaultConfig {
+        home: Some(display(&absolute_path(home)?)),
+    };
+    write_file(
+        &default_config_path(),
+        toml::to_string_pretty(&config)?.as_bytes(),
+    )
 }
 
 fn config_path(home: &Path) -> PathBuf {
@@ -1476,9 +1568,23 @@ fn config_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
             println!("{}", display(&config_path(home)));
             Ok(())
         }
+        "set-home" => set_default_home(home, args),
         "show" => show_config(home),
         other => Err(MaehError::Usage(format!("unknown config command {other}"))),
     }
+}
+
+fn set_default_home(home: &Path, args: &mut Vec<String>) -> Result<()> {
+    let selected = if args.is_empty() {
+        home.to_path_buf()
+    } else {
+        PathBuf::from(take_arg(args, "home path")?)
+    };
+    let selected = absolute_path(&selected)?;
+    write_default_home(&selected)?;
+    println!("default home: {}", display(&selected));
+    println!("default config: {}", display(&default_config_path()));
+    Ok(())
 }
 
 fn read_config(home: &Path) -> Result<Config> {

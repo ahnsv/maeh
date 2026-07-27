@@ -8,6 +8,7 @@
 | config initialization | `maeh init` |
 | resolved config display | `maeh config show` |
 | env export bridge | `maeh config emit` |
+| persisted default home | `maeh --home <path> config set-home` |
 | config/state smoke check | `maeh selftest` |
 | append JSONL span | `maeh ledger append --loop <name> --event <event> --target <slot> --data <json>` |
 | list JSONL spans | `maeh ledger list --loop <name>` |

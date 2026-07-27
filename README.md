@@ -50,6 +50,7 @@ maeh init
 maeh config path
 maeh config show
 maeh config emit
+maeh --home ~/.claude/orchestrator config set-home
 maeh ledger append --loop daily --event run_start --target w1 --data '{}'
 maeh ledger list --loop daily
 maeh state tag w1 task_url https://example/task
@@ -89,7 +90,7 @@ maeh selftest
 
 ## Design
 
-- deterministic local state under `MAEH_HOME` or `~/.maeh`
+- deterministic local state under `--home`, `MAEH_HOME`, a persisted default home (`MAEH_CONFIG`/XDG), or `~/.maeh`
 - line-oriented output that is easy to assert in tests and parse in logs
 - compact task capsules so agents do not repeatedly pull full Notion/Linear/Jira context
 - per-loop board cache TTLs matching the orchestration cadence
