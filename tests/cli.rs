@@ -1361,6 +1361,107 @@ fn slot_review_transition_preserves_metadata_and_counts_only_review_cap() {
 }
 
 #[test]
+fn loop_json_surfaces_are_exact_opt_in_and_failures_are_empty_stdout() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("state");
+    init_home(&home);
+    fs::write(
+        home.join("config.toml"),
+        "backend = 'tmux'\ncontext_switch_cap = 2\nreview_cap = 1\n",
+    )
+    .unwrap();
+    register_slot(&home, "active", "tmux", "active", "/tmp/active", "/repo");
+    register_slot(&home, "done", "tmux", "done", "/tmp/done", "/repo");
+    register_slot(&home, "review", "tmux", "review", "/tmp/review", "/repo");
+
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["status", "list"])
+        .assert()
+        .success()
+        .stdout("active\thttps://tasks/active\tactive\t0\t0\tactive\t\t/tmp/active\tactive:p\tactive:c\t/repo\ndone\thttps://tasks/done\tdone\t0\t0\tdone\t\t/tmp/done\tdone:p\tdone:c\t/repo\nreview\thttps://tasks/review\treview\t0\t0\treview\t\t/tmp/review\treview:p\treview:c\t/repo\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["status", "list", "--json"])
+        .assert()
+        .success()
+        .stdout("[{\"slot\":\"active\",\"task_url\":\"https://tasks/active\",\"status\":\"active\",\"snooze_until\":\"0\",\"age_secs\":0,\"class\":\"active\",\"label\":\"\",\"worktree\":\"/tmp/active\",\"primary_pane\":\"active:p\",\"critic_pane\":\"active:c\",\"repo\":\"/repo\"},{\"slot\":\"done\",\"task_url\":\"https://tasks/done\",\"status\":\"done\",\"snooze_until\":\"0\",\"age_secs\":0,\"class\":\"done\",\"label\":\"\",\"worktree\":\"/tmp/done\",\"primary_pane\":\"done:p\",\"critic_pane\":\"done:c\",\"repo\":\"/repo\"},{\"slot\":\"review\",\"task_url\":\"https://tasks/review\",\"status\":\"review\",\"snooze_until\":\"0\",\"age_secs\":0,\"class\":\"review\",\"label\":\"\",\"worktree\":\"/tmp/review\",\"primary_pane\":\"review:p\",\"critic_pane\":\"review:c\",\"repo\":\"/repo\"}]\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["cleanup", "list", "--json"])
+        .assert()
+        .success()
+        .stdout("[{\"slot\":\"done\",\"task_url\":\"https://tasks/done\",\"status\":\"done\",\"snooze_until\":\"0\",\"age_secs\":0,\"class\":\"done\",\"label\":\"\",\"worktree\":\"/tmp/done\",\"primary_pane\":\"done:p\",\"critic_pane\":\"done:c\",\"repo\":\"/repo\"}]\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["cap", "check", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"work\":{\"count\":1,\"cap\":2,\"available\":true},\"review\":{\"count\":1,\"cap\":1,\"available\":false}}\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["verify", "slot", "active", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"slot\":\"active\",\"status\":\"active\",\"worktree\":\"/tmp/active\",\"primary_pane\":\"active:p\",\"critic_pane\":\"active:c\"}\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["slot", "verify", "--slot", "active", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"slot\":\"active\",\"status\":\"active\",\"worktree\":\"/tmp/active\",\"primary_pane\":\"active:p\",\"critic_pane\":\"active:c\"}\n");
+
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "tag", "partial", "worktree", "/tmp/partial"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["slot", "verify", "missing", "--json"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout("")
+        .stderr("maeh error: cache miss: missing\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["verify", "slot", "partial", "--json"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout("")
+        .stderr("maeh error: cache miss: partial:primary_pane\n");
+
+    let corrupt = temp.path().join("corrupt-state");
+    init_home(&corrupt);
+    fs::write(corrupt.join("state.json"), "nope").unwrap();
+    for args in [
+        ["status", "list", "--json"].as_slice(),
+        ["cap", "check", "--json"].as_slice(),
+    ] {
+        maeh()
+            .arg("--home")
+            .arg(&corrupt)
+            .args(args)
+            .assert()
+            .failure()
+            .code(1)
+            .stdout("")
+            .stderr("maeh error: json: expected ident at line 1 column 2\n");
+    }
+}
+
+#[test]
 fn slot_wrapper_contracts_cover_lifecycle_paths() {
     let temp = TempDir::new().unwrap();
     let home = temp.path().join("state");

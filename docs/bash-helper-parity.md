@@ -28,9 +28,11 @@
 | worktree/workspace plan | `maeh worktree plan --slot <slot> --repo <repo> --path <path> [--create] [--no-editor]` |
 | worktree/workspace open | `maeh worktree open --slot <slot> --repo <repo> --path <path> [--create]` |
 | spawn primary/critic agents | `maeh slot spawn --backend <backend> --slot <slot> --repo <repo> --branch <branch> --path <path> --task-url <url> --editor true|false --exec` |
-| verify spawned slot | `maeh slot verify <slot>` |
+| verify spawned slot | `maeh slot verify <slot> [--json]` or `maeh verify slot <slot> [--json]` |
 | close backend slot | `maeh slot close <slot> --exec` |
 | remove slot worktree | `maeh slot worktree-remove <slot> [--exec]` |
+| machine-readable loop slot list | `maeh status list --json` or `maeh cleanup list --json` |
+| machine-readable cap check | `maeh cap check --json` |
 | count/filter slots | `maeh slot count --status active,blocked` or `maeh slot count --class stale` |
 | snooze/block/resume slot | `maeh slot snooze <slot> --until <epoch>` / `maeh slot snooze <slot> --days <n> --status blocked` / `maeh slot block <slot> --reason <text>` / `maeh slot resume <slot>` |
 | queued prompt delivery | `maeh kickoff run --slot <slot> --prompt <text>` or `maeh agent deliver <target> <prompt> --exec` |
