@@ -5,12 +5,13 @@ use maeh::backend::{
     adapter_for, delivery_plan, pane_text_from_read_output, print_operations,
     verify_prompt_execution, RealRunner,
 };
+use serde::Serialize;
 
 use crate::commands::provision::{required_flag, run_command};
 use crate::commands::state::read_state;
 use crate::config::{backend_settings, print_backend_resolution};
 use crate::error::{MaehError, Result};
-use crate::util::{flag_value, take_arg};
+use crate::util::{flag_present, flag_value, take_arg};
 
 pub(crate) fn agent_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
     match take_arg(args, "agent command")?.as_str() {
@@ -128,7 +129,10 @@ pub(crate) fn verify_command(home: &Path, args: &mut Vec<String>) -> Result<()> 
             println!("  prompt head: {}", verification.prompt_head);
             Ok(())
         }
-        "slot" => verify_slot(home, &take_arg(args, "slot")?),
+        "slot" => {
+            let json = flag_present(args, "--json");
+            verify_slot(home, &take_arg(args, "slot")?, json)
+        }
         other => Err(MaehError::Usage(format!("unknown verify command {other}"))),
     }
 }
@@ -154,7 +158,16 @@ fn read_text_flag(args: &mut Vec<String>, value_flag: &str, file_flag: &str) -> 
     required_flag(args, value_flag)
 }
 
-pub(crate) fn verify_slot(home: &Path, slot: &str) -> Result<()> {
+#[derive(Serialize)]
+struct SlotVerification {
+    slot: String,
+    status: String,
+    worktree: String,
+    primary_pane: String,
+    critic_pane: String,
+}
+
+pub(crate) fn verify_slot(home: &Path, slot: &str, json: bool) -> Result<()> {
     let state = read_state(home)?;
     let entry = state
         .get(slot)
@@ -164,23 +177,25 @@ pub(crate) fn verify_slot(home: &Path, slot: &str) -> Result<()> {
             return Err(MaehError::CacheMiss(format!("{slot}:{key}")));
         }
     }
+    let verification = SlotVerification {
+        slot: slot.to_string(),
+        status: entry
+            .get("status")
+            .cloned()
+            .unwrap_or_else(|| "none".to_string()),
+        worktree: entry.get("worktree").cloned().unwrap_or_default(),
+        primary_pane: entry.get("primary_pane").cloned().unwrap_or_default(),
+        critic_pane: entry.get("critic_pane").cloned().unwrap_or_default(),
+    };
+    if json {
+        println!("{}", serde_json::to_string(&verification)?);
+        return Ok(());
+    }
     println!("slot verified");
-    println!("  slot: {slot}");
-    println!(
-        "  status: {}",
-        entry.get("status").map_or("none", String::as_str)
-    );
-    println!(
-        "  worktree: {}",
-        entry.get("worktree").map_or("", String::as_str)
-    );
-    println!(
-        "  primary pane: {}",
-        entry.get("primary_pane").map_or("", String::as_str)
-    );
-    println!(
-        "  critic pane: {}",
-        entry.get("critic_pane").map_or("", String::as_str)
-    );
+    println!("  slot: {}", verification.slot);
+    println!("  status: {}", verification.status);
+    println!("  worktree: {}", verification.worktree);
+    println!("  primary pane: {}", verification.primary_pane);
+    println!("  critic pane: {}", verification.critic_pane);
     Ok(())
 }

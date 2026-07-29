@@ -69,7 +69,7 @@ maeh backend list-worktrees
 maeh worktree plan --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor
 maeh worktree open --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create
 maeh slot spawn --backend herdr --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --task-url https://example/task --editor false --exec
-maeh slot verify w1
+maeh slot verify w1 [--json]
 maeh slot close w1 --exec
 maeh slot worktree-remove w1 --exec
 maeh slot count --status active,blocked
@@ -81,8 +81,10 @@ maeh agent deliver w1:p2 "Do the task" --exec
 maeh kickoff plan --target w1:p2 --prompt "Do the task"
 maeh kickoff run --slot w1 --prompt "Do the task"
 maeh verify prompt --before "› Do the task" --after "Working" --prompt "Do the task"
-maeh status list
+maeh status list [--json]
 maeh statusline
+maeh cleanup list [--json]
+maeh cap check [--json]
 maeh work-hours
 maeh doctor
 maeh selftest

@@ -5,6 +5,7 @@ use maeh::backend::{
     adapter_for, print_operations, BackendEnv, BackendKind, BackendSettings, BackendSlot,
     CommandSpec, OperationPlan, RealRunner,
 };
+use serde::Serialize;
 
 use crate::commands::agent::{deliver_command, verify_slot};
 use crate::commands::provision::{
@@ -77,8 +78,9 @@ pub(crate) fn slot_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
     match take_arg(args, "slot command")?.as_str() {
         "spawn" => slot_spawn_with_label(home, "slot spawn", args),
         "verify" => {
+            let json = flag_present(args, "--json");
             let slot = slot_arg(args)?;
-            verify_slot(home, &slot)
+            verify_slot(home, &slot, json)
         }
         "close" => slot_close(home, args),
         "list" => print_slot_rows(
@@ -86,6 +88,7 @@ pub(crate) fn slot_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
             &flag_value(args, "--class", "all")?,
             &flag_value(args, "--status", "")?,
             0,
+            false,
         ),
         "inspect" => {
             let slot = slot_arg(args)?;
@@ -342,36 +345,83 @@ pub(crate) fn slot_worktree_remove(home: &Path, args: &mut Vec<String>) -> Resul
     Ok(())
 }
 
+#[derive(Serialize)]
+pub(crate) struct SlotRow {
+    slot: String,
+    task_url: String,
+    status: String,
+    snooze_until: String,
+    age_secs: u64,
+    class: String,
+    label: String,
+    worktree: String,
+    primary_pane: String,
+    critic_pane: String,
+    repo: String,
+}
+
 pub(crate) fn print_slot_rows(
     home: &Path,
     class_filter: &str,
     status_filter: &str,
     stale_secs: u64,
+    json: bool,
 ) -> Result<()> {
+    let rows = slot_rows(home, class_filter, status_filter, stale_secs)?;
+    if json {
+        println!("{}", serde_json::to_string(&rows)?);
+        return Ok(());
+    }
+    for row in rows {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            row.slot,
+            row.task_url,
+            row.status,
+            row.snooze_until,
+            row.age_secs,
+            row.class,
+            row.label,
+            row.worktree,
+            row.primary_pane,
+            row.critic_pane,
+            row.repo,
+        );
+    }
+    Ok(())
+}
+
+fn slot_rows(
+    home: &Path,
+    class_filter: &str,
+    status_filter: &str,
+    stale_secs: u64,
+) -> Result<Vec<SlotRow>> {
+    let now = now_epoch();
+    let mut rows = Vec::new();
     for (slot, entry) in read_state(home)? {
-        let class = slot_class_with_stale(&entry, now_epoch(), stale_secs);
+        let class = slot_class_with_stale(&entry, now, stale_secs);
         if class_filter != "all" && class != class_filter {
             continue;
         }
         if !status_matches(&entry, status_filter) {
             continue;
         }
-        println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        rows.push(SlotRow {
             slot,
-            entry.get("task_url").map_or("", String::as_str),
-            entry.get("status").map_or("none", String::as_str),
-            entry.get("snooze_until").map_or("0", String::as_str),
-            slot_age(&entry, now_epoch()),
+            task_url: entry_value(&entry, "task_url", ""),
+            status: entry_value(&entry, "status", "none"),
+            snooze_until: entry_value(&entry, "snooze_until", "0"),
+            age_secs: slot_age(&entry, now),
             class,
-            entry.get("label").map_or("", String::as_str),
-            entry.get("worktree").map_or("", String::as_str),
-            entry.get("primary_pane").map_or("", String::as_str),
-            entry.get("critic_pane").map_or("", String::as_str),
-            entry.get("repo").map_or("", String::as_str),
-        );
+            label: entry_value(&entry, "label", ""),
+            worktree: entry_value(&entry, "worktree", ""),
+            primary_pane: entry_value(&entry, "primary_pane", ""),
+            critic_pane: entry_value(&entry, "critic_pane", ""),
+            repo: entry_value(&entry, "repo", ""),
+        });
     }
-    Ok(())
+    Ok(rows)
 }
 
 pub(crate) fn print_task_slot_rows(home: &Path) -> Result<()> {
@@ -479,6 +529,13 @@ fn slot_age(entry: &BTreeMap<String, String>, now: u64) -> u64 {
         .get("last_activity_epoch")
         .and_then(|value| value.parse::<u64>().ok())
         .map_or(0, |last| now.saturating_sub(last))
+}
+
+fn entry_value(entry: &BTreeMap<String, String>, key: &str, default: &str) -> String {
+    entry
+        .get(key)
+        .cloned()
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn settings_for_entry(

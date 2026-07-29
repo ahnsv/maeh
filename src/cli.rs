@@ -521,7 +521,7 @@ pub(crate) enum VerifySubcommand {
     #[command(about = "Compare before/after pane text against a prompt")]
     Prompt(VerifyPromptArgs),
     #[command(about = "Verify local slot has worktree, primary pane, and critic pane")]
-    Slot(SlotRefArgs),
+    Slot(VerifySlotArgs),
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -550,6 +550,14 @@ pub(crate) struct SlotRefArgs {
     slot_flag: Option<String>,
 }
 
+#[derive(Args, Debug, Default)]
+pub(crate) struct VerifySlotArgs {
+    #[command(flatten)]
+    slot: SlotRefArgs,
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(Args, Debug)]
 pub(crate) struct SlotArgs {
     #[command(subcommand)]
@@ -561,7 +569,7 @@ pub(crate) enum SlotSubcommand {
     #[command(about = "Plan or execute a managed workspace plus agents")]
     Spawn(SlotSpawnOptions),
     #[command(about = "Verify required local slot metadata")]
-    Verify(SlotRefArgs),
+    Verify(VerifySlotArgs),
     #[command(about = "Plan or execute backend workspace/window close")]
     Close(SlotCloseArgs),
     #[command(about = "Print tab-separated slot rows")]
@@ -596,6 +604,14 @@ pub(crate) struct FilterArgs {
     class_filter: Option<String>,
     #[arg(long, value_name = "LIST", allow_hyphen_values = true)]
     status: Option<String>,
+}
+
+#[derive(Args, Debug, Default)]
+pub(crate) struct JsonFilterArgs {
+    #[command(flatten)]
+    filter: FilterArgs,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -655,7 +671,7 @@ pub(crate) struct CleanupArgs {
 #[derive(Subcommand, Debug)]
 pub(crate) enum CleanupSubcommand {
     #[command(about = "List slots; defaults to --class done")]
-    List(FilterArgs),
+    List(JsonFilterArgs),
     #[command(about = "Inspect one slot")]
     Inspect(SlotRefArgs),
     #[command(about = "Plan or execute backend close for one slot")]
@@ -701,7 +717,7 @@ pub(crate) struct StatusArgs {
 #[derive(Subcommand, Debug)]
 pub(crate) enum StatusSubcommand {
     #[command(about = "Print tab-separated slot status rows")]
-    List(FilterArgs),
+    List(JsonFilterArgs),
     #[command(about = "Print all metadata for one slot")]
     Inspect(SlotRefArgs),
     #[command(about = "Print locally tracked worktree rows")]
@@ -719,9 +735,15 @@ pub(crate) struct CapArgs {
 #[derive(Subcommand, Debug)]
 pub(crate) enum CapSubcommand {
     #[command(about = "Print work/review counts and whether work capacity remains")]
-    Check,
+    Check(CapCheckArgs),
     #[command(external_subcommand)]
     External(Vec<String>),
+}
+
+#[derive(Args, Debug, Default)]
+pub(crate) struct CapCheckArgs {
+    #[arg(long)]
+    json: bool,
 }
 
 impl Commands {
@@ -1095,9 +1117,9 @@ impl VerifyArgs {
                 push_optional(&mut args, "--prompt-file", &command.prompt_file);
                 args
             }
-            Some(VerifySubcommand::Slot(slot)) => {
+            Some(VerifySubcommand::Slot(command)) => {
                 let mut args = vec!["slot".to_string()];
-                slot.append_value(&mut args);
+                command.append_value(&mut args);
                 args
             }
             Some(VerifySubcommand::External(args)) => args,
@@ -1114,7 +1136,7 @@ impl SlotArgs {
                 command.append(&mut args);
                 args
             }
-            Some(SlotSubcommand::Verify(slot)) => slot_command_args("verify", slot),
+            Some(SlotSubcommand::Verify(command)) => verify_slot_command_args("verify", command),
             Some(SlotSubcommand::Close(command)) => {
                 let mut args = vec!["close".to_string()];
                 command.append(&mut args);
@@ -1167,6 +1189,18 @@ impl SlotRefArgs {
     }
 }
 
+impl VerifySlotArgs {
+    fn append_value(&self, args: &mut Vec<String>) {
+        self.slot.append_value(args);
+        push_present(args, "--json", self.json);
+    }
+
+    fn append_flag_or_value(&self, args: &mut Vec<String>) {
+        self.slot.append_flag_or_value(args);
+        push_present(args, "--json", self.json);
+    }
+}
+
 impl SlotMarkArgs {
     fn append(&self, args: &mut Vec<String>) {
         self.slot.append_flag_or_value(args);
@@ -1206,7 +1240,7 @@ impl SlotWorktreeRemoveArgs {
 impl CleanupArgs {
     fn into_args(self) -> Vec<String> {
         match self.command {
-            Some(CleanupSubcommand::List(filter)) => filter_args("list", filter),
+            Some(CleanupSubcommand::List(filter)) => json_filter_args("list", filter),
             Some(CleanupSubcommand::Inspect(slot)) => slot_command_args("inspect", slot),
             Some(CleanupSubcommand::Close(command)) => {
                 let mut args = vec!["close".to_string()];
@@ -1243,7 +1277,7 @@ impl RevampArgs {
 impl StatusArgs {
     fn into_args(self) -> Vec<String> {
         match self.command {
-            Some(StatusSubcommand::List(filter)) => filter_args("list", filter),
+            Some(StatusSubcommand::List(filter)) => json_filter_args("list", filter),
             Some(StatusSubcommand::Inspect(slot)) => slot_command_args("inspect", slot),
             Some(StatusSubcommand::Worktrees) => vec!["worktrees".to_string()],
             Some(StatusSubcommand::External(args)) => args,
@@ -1255,7 +1289,11 @@ impl StatusArgs {
 impl CapArgs {
     fn into_args(self) -> Vec<String> {
         match self.command {
-            Some(CapSubcommand::Check) => vec!["check".to_string()],
+            Some(CapSubcommand::Check(command)) => {
+                let mut args = vec!["check".to_string()];
+                push_present(&mut args, "--json", command.json);
+                args
+            }
             Some(CapSubcommand::External(args)) => args,
             None => Vec::new(),
         }
@@ -1268,10 +1306,22 @@ fn slot_command_args(command: &str, slot: SlotRefArgs) -> Vec<String> {
     args
 }
 
+fn verify_slot_command_args(command: &str, slot: VerifySlotArgs) -> Vec<String> {
+    let mut args = vec![command.to_string()];
+    slot.append_flag_or_value(&mut args);
+    args
+}
+
 fn filter_args(command: &str, filter: FilterArgs) -> Vec<String> {
     let mut args = vec![command.to_string()];
     push_optional(&mut args, "--class", &filter.class_filter);
     push_optional(&mut args, "--status", &filter.status);
+    args
+}
+
+fn json_filter_args(command: &str, filter: JsonFilterArgs) -> Vec<String> {
+    let mut args = filter_args(command, filter.filter);
+    push_present(&mut args, "--json", filter.json);
     args
 }
 

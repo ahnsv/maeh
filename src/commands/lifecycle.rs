@@ -8,7 +8,8 @@ use crate::commands::slot::{
 use crate::commands::state::read_state;
 use crate::config::read_config;
 use crate::error::{MaehError, Result};
-use crate::util::{flag_value, now_epoch, take_arg};
+use crate::util::{flag_present, flag_value, now_epoch, take_arg};
+use serde::Serialize;
 
 pub(crate) fn cleanup_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
     match take_arg(args, "cleanup command")?.as_str() {
@@ -17,6 +18,7 @@ pub(crate) fn cleanup_command(home: &Path, args: &mut Vec<String>) -> Result<()>
             &flag_value(args, "--class", "done")?,
             &flag_value(args, "--status", "")?,
             0,
+            flag_present(args, "--json"),
         ),
         "inspect" => {
             let slot = slot_arg(args)?;
@@ -47,6 +49,7 @@ pub(crate) fn revamp_command(home: &Path, args: &mut Vec<String>) -> Result<()> 
             &flag_value(args, "--class", "stale")?,
             &flag_value(args, "--status", "")?,
             86_400,
+            false,
         ),
         "inspect" => {
             let slot = slot_arg(args)?;
@@ -77,6 +80,7 @@ pub(crate) fn status_command(home: &Path, args: &mut Vec<String>) -> Result<()> 
             &flag_value(args, "--class", "all")?,
             &flag_value(args, "--status", "")?,
             0,
+            flag_present(args, "--json"),
         ),
         "inspect" => {
             let slot = slot_arg(args)?;
@@ -89,12 +93,25 @@ pub(crate) fn status_command(home: &Path, args: &mut Vec<String>) -> Result<()> 
 
 pub(crate) fn cap_command(home: &Path, args: &mut Vec<String>) -> Result<()> {
     match take_arg(args, "cap command")?.as_str() {
-        "check" => cap_check(home),
+        "check" => cap_check(home, flag_present(args, "--json")),
         other => Err(MaehError::Usage(format!("unknown cap command {other}"))),
     }
 }
 
-fn cap_check(home: &Path) -> Result<()> {
+#[derive(Serialize)]
+struct CapCheck {
+    work: CapBucket,
+    review: CapBucket,
+}
+
+#[derive(Serialize)]
+struct CapBucket {
+    count: u64,
+    cap: u64,
+    available: bool,
+}
+
+fn cap_check(home: &Path, json: bool) -> Result<()> {
     let config = read_config(home)?;
     let mut work = 0;
     let mut review = 0;
@@ -104,6 +121,22 @@ fn cap_check(home: &Path) -> Result<()> {
             Some("review") => review += 1,
             _ => {}
         }
+    }
+    let check = CapCheck {
+        work: CapBucket {
+            count: work,
+            cap: config.context_switch_cap,
+            available: work < config.context_switch_cap,
+        },
+        review: CapBucket {
+            count: review,
+            cap: config.review_cap,
+            available: review < config.review_cap,
+        },
+    };
+    if json {
+        println!("{}", serde_json::to_string(&check)?);
+        return Ok(());
     }
     println!("cap check");
     println!("  work: {work}/{}", config.context_switch_cap);
