@@ -1416,6 +1416,19 @@ fn loop_json_surfaces_are_exact_opt_in_and_failures_are_empty_stdout() {
         .assert()
         .success()
         .stdout("{\"slot\":\"active\",\"status\":\"active\",\"worktree\":\"/tmp/active\",\"primary_pane\":\"active:p\",\"critic_pane\":\"active:c\"}\n");
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["state", "untag", "active", "status"])
+        .assert()
+        .success();
+    maeh()
+        .arg("--home")
+        .arg(&home)
+        .args(["slot", "verify", "active", "--json"])
+        .assert()
+        .success()
+        .stdout("{\"slot\":\"active\",\"status\":\"none\",\"worktree\":\"/tmp/active\",\"primary_pane\":\"active:p\",\"critic_pane\":\"active:c\"}\n");
 
     maeh()
         .arg("--home")
