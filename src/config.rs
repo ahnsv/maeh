@@ -292,48 +292,46 @@ pub(crate) fn read_config(home: &Path) -> Result<Config> {
 }
 
 fn normalize_default_config(value: &mut toml::Value) {
-    let Some(table) = value.as_table_mut() else {
-        return;
-    };
-    move_legacy_key(table, "home", "paths", "home");
+    if let Some(table) = value.as_table_mut() {
+        move_legacy_key(table, "home", "paths", "home");
+    }
 }
 
 fn normalize_config(value: &mut toml::Value) {
-    let Some(table) = value.as_table_mut() else {
-        return;
-    };
-    move_legacy_key(table, "backend", "backend", "kind");
-    move_legacy_key(table, "herdr_bin", "backend", "herdr_bin");
-    move_legacy_key(table, "tmux_bin", "backend", "tmux_bin");
-    move_legacy_key(table, "tmux_session", "backend", "tmux_session");
-    move_legacy_key(table, "include_editor", "layout", "include_editor");
-    move_legacy_key(table, "focus", "layout", "focus");
-    move_legacy_key(table, "primary_agent_cmd", "agents", "primary_cmd");
-    move_legacy_key(table, "critic_agent_cmd", "agents", "critic_cmd");
-    move_legacy_key(table, "editor_cmd", "agents", "editor_cmd");
-    move_legacy_key(table, "context_switch_cap", "limits", "context_switch_cap");
-    move_legacy_key(table, "review_cap", "limits", "review_cap");
-    move_legacy_key(
-        table,
-        "board_ttl_intake_secs",
-        "board_cache",
-        "intake_ttl_secs",
-    );
-    move_legacy_key(
-        table,
-        "board_ttl_revamp_secs",
-        "board_cache",
-        "revamp_ttl_secs",
-    );
-    move_legacy_key(
-        table,
-        "task_capsule_max_chars",
-        "task_capsules",
-        "max_chars",
-    );
-    move_legacy_key(table, "work_start_hour", "work_hours", "start_hour");
-    move_legacy_key(table, "work_end_hour", "work_hours", "end_hour");
-    move_legacy_key(table, "workdays", "work_hours", "workdays");
+    if let Some(table) = value.as_table_mut() {
+        move_legacy_key(table, "backend", "backend", "kind");
+        move_legacy_key(table, "herdr_bin", "backend", "herdr_bin");
+        move_legacy_key(table, "tmux_bin", "backend", "tmux_bin");
+        move_legacy_key(table, "tmux_session", "backend", "tmux_session");
+        move_legacy_key(table, "include_editor", "layout", "include_editor");
+        move_legacy_key(table, "focus", "layout", "focus");
+        move_legacy_key(table, "primary_agent_cmd", "agents", "primary_cmd");
+        move_legacy_key(table, "critic_agent_cmd", "agents", "critic_cmd");
+        move_legacy_key(table, "editor_cmd", "agents", "editor_cmd");
+        move_legacy_key(table, "context_switch_cap", "limits", "context_switch_cap");
+        move_legacy_key(table, "review_cap", "limits", "review_cap");
+        move_legacy_key(
+            table,
+            "board_ttl_intake_secs",
+            "board_cache",
+            "intake_ttl_secs",
+        );
+        move_legacy_key(
+            table,
+            "board_ttl_revamp_secs",
+            "board_cache",
+            "revamp_ttl_secs",
+        );
+        move_legacy_key(
+            table,
+            "task_capsule_max_chars",
+            "task_capsules",
+            "max_chars",
+        );
+        move_legacy_key(table, "work_start_hour", "work_hours", "start_hour");
+        move_legacy_key(table, "work_end_hour", "work_hours", "end_hour");
+        move_legacy_key(table, "workdays", "work_hours", "workdays");
+    }
 }
 
 fn move_legacy_key(table: &mut toml::Table, key: &str, section: &str, field: &str) {

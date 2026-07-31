@@ -84,16 +84,10 @@ pub(crate) fn spawn_request(config: &Config, args: &mut Vec<String>) -> Result<S
     let worktree = worktree_request(config, args)?;
     let primary_arg = flag_value(args, "--primary-cmd", &config.agents.primary_cmd)?;
     let primary_agent_cmd = command_words(&primary_arg);
-    let critic_agent_cmd = command_words(&flag_value(
-        args,
-        "--critic-cmd",
-        &config.agents.critic_cmd,
-    )?);
-    let editor_cmd = command_words(&flag_value(
-        args,
-        "--editor-cmd",
-        &config.agents.editor_cmd,
-    )?);
+    let critic_arg = flag_value(args, "--critic-cmd", &config.agents.critic_cmd)?;
+    let critic_agent_cmd = command_words(&critic_arg);
+    let editor_arg = flag_value(args, "--editor-cmd", &config.agents.editor_cmd)?;
+    let editor_cmd = command_words(&editor_arg);
     Ok(SpawnRequest {
         worktree,
         task_url,
