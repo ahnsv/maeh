@@ -120,6 +120,8 @@ review_cap = 5
 
 `--home` overrides both `MAEH_HOME` and the persisted `[paths].home` value.
 
+See [`docs/config.md`](docs/config.md) for the full reference and [`docs/config.example.toml`](docs/config.example.toml) for a copyable sample.
+
 ## Design
 
 - deterministic local state under `--home`, `MAEH_HOME`, a persisted default home (`MAEH_CONFIG`/XDG `[paths].home`), or `~/.maeh`
