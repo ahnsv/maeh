@@ -10,50 +10,138 @@ use crate::util::{display, join_numbers, stable_hash, take_arg, write_file};
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub(crate) struct DefaultConfig {
+    paths: DefaultPathsConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+struct DefaultPathsConfig {
     home: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub(crate) struct Config {
+    pub(crate) backend: BackendConfig,
+    pub(crate) layout: LayoutConfig,
+    pub(crate) agents: AgentConfig,
+    pub(crate) limits: LimitsConfig,
+    pub(crate) board_cache: BoardCacheConfig,
+    pub(crate) task_capsules: TaskCapsuleConfig,
+    pub(crate) work_hours: WorkHoursConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
-pub(crate) struct Config {
-    pub(crate) backend: BackendKind,
+pub(crate) struct BackendConfig {
+    pub(crate) kind: BackendKind,
     pub(crate) herdr_bin: String,
     pub(crate) tmux_bin: String,
     pub(crate) tmux_session: String,
-    pub(crate) include_editor: bool,
-    pub(crate) focus: bool,
-    pub(crate) primary_agent_cmd: String,
-    pub(crate) critic_agent_cmd: String,
-    pub(crate) editor_cmd: String,
-    pub(crate) context_switch_cap: u64,
-    pub(crate) review_cap: u64,
-    pub(crate) board_ttl_intake_secs: u64,
-    pub(crate) board_ttl_revamp_secs: u64,
-    pub(crate) task_capsule_max_chars: usize,
-    pub(crate) work_start_hour: u32,
-    pub(crate) work_end_hour: u32,
-    pub(crate) workdays: Vec<u32>,
 }
 
-impl Default for Config {
+impl Default for BackendConfig {
     fn default() -> Self {
         Self {
-            backend: BackendKind::Auto,
+            kind: BackendKind::Auto,
             herdr_bin: "herdr".to_string(),
             tmux_bin: "tmux".to_string(),
             tmux_session: "maeh".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub(crate) struct LayoutConfig {
+    pub(crate) include_editor: bool,
+    pub(crate) focus: bool,
+}
+
+impl Default for LayoutConfig {
+    fn default() -> Self {
+        Self {
             include_editor: true,
             focus: false,
-            primary_agent_cmd: "codex".to_string(),
-            critic_agent_cmd: "codex".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub(crate) struct AgentConfig {
+    pub(crate) primary_cmd: String,
+    pub(crate) critic_cmd: String,
+    pub(crate) editor_cmd: String,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            primary_cmd: "codex".to_string(),
+            critic_cmd: "codex".to_string(),
             editor_cmd: "vi".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub(crate) struct LimitsConfig {
+    pub(crate) context_switch_cap: u64,
+    pub(crate) review_cap: u64,
+}
+
+impl Default for LimitsConfig {
+    fn default() -> Self {
+        Self {
             context_switch_cap: 3,
             review_cap: 5,
-            board_ttl_intake_secs: 3_600,
-            board_ttl_revamp_secs: 10_800,
-            task_capsule_max_chars: 1_800,
-            work_start_hour: 9,
-            work_end_hour: 17,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub(crate) struct BoardCacheConfig {
+    pub(crate) intake_ttl_secs: u64,
+    pub(crate) revamp_ttl_secs: u64,
+}
+
+impl Default for BoardCacheConfig {
+    fn default() -> Self {
+        Self {
+            intake_ttl_secs: 3_600,
+            revamp_ttl_secs: 10_800,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub(crate) struct TaskCapsuleConfig {
+    pub(crate) max_chars: usize,
+}
+
+impl Default for TaskCapsuleConfig {
+    fn default() -> Self {
+        Self { max_chars: 1_800 }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub(crate) struct WorkHoursConfig {
+    pub(crate) start_hour: u32,
+    pub(crate) end_hour: u32,
+    pub(crate) workdays: Vec<u32>,
+}
+
+impl Default for WorkHoursConfig {
+    fn default() -> Self {
+        Self {
+            start_hour: 9,
+            end_hour: 17,
             workdays: vec![1, 2, 3, 4, 5],
         }
     }
@@ -93,8 +181,10 @@ fn default_home() -> Result<Option<PathBuf>> {
     if !path.exists() {
         return Ok(None);
     }
-    let config: DefaultConfig = toml::from_str(&fs::read_to_string(&path)?)?;
-    Ok(config.home.map(|home| configured_path(&path, &home)))
+    let mut value: toml::Value = toml::from_str(&fs::read_to_string(&path)?)?;
+    normalize_default_config(&mut value);
+    let config: DefaultConfig = value.try_into()?;
+    Ok(config.paths.home.map(|home| configured_path(&path, &home)))
 }
 
 fn configured_path(config: &Path, value: &str) -> PathBuf {
@@ -131,7 +221,9 @@ pub(crate) fn absolute_path(path: &Path) -> Result<PathBuf> {
 
 fn write_default_home(home: &Path) -> Result<()> {
     let config = DefaultConfig {
-        home: Some(display(&absolute_path(home)?)),
+        paths: DefaultPathsConfig {
+            home: Some(display(&absolute_path(home)?)),
+        },
     };
     write_file(
         &default_config_path(),
@@ -189,7 +281,9 @@ fn set_default_home(home: &Path, args: &mut Vec<String>) -> Result<()> {
 pub(crate) fn read_config(home: &Path) -> Result<Config> {
     let path = config_path(home);
     let mut config = if path.exists() {
-        toml::from_str(&fs::read_to_string(path)?)?
+        let mut value: toml::Value = toml::from_str(&fs::read_to_string(path)?)?;
+        normalize_config(&mut value);
+        value.try_into()?
     } else {
         Config::default()
     };
@@ -197,21 +291,82 @@ pub(crate) fn read_config(home: &Path) -> Result<Config> {
     Ok(config)
 }
 
+fn normalize_default_config(value: &mut toml::Value) {
+    let Some(table) = value.as_table_mut() else {
+        return;
+    };
+    move_legacy_key(table, "home", "paths", "home");
+}
+
+fn normalize_config(value: &mut toml::Value) {
+    let Some(table) = value.as_table_mut() else {
+        return;
+    };
+    move_legacy_key(table, "backend", "backend", "kind");
+    move_legacy_key(table, "herdr_bin", "backend", "herdr_bin");
+    move_legacy_key(table, "tmux_bin", "backend", "tmux_bin");
+    move_legacy_key(table, "tmux_session", "backend", "tmux_session");
+    move_legacy_key(table, "include_editor", "layout", "include_editor");
+    move_legacy_key(table, "focus", "layout", "focus");
+    move_legacy_key(table, "primary_agent_cmd", "agents", "primary_cmd");
+    move_legacy_key(table, "critic_agent_cmd", "agents", "critic_cmd");
+    move_legacy_key(table, "editor_cmd", "agents", "editor_cmd");
+    move_legacy_key(table, "context_switch_cap", "limits", "context_switch_cap");
+    move_legacy_key(table, "review_cap", "limits", "review_cap");
+    move_legacy_key(
+        table,
+        "board_ttl_intake_secs",
+        "board_cache",
+        "intake_ttl_secs",
+    );
+    move_legacy_key(
+        table,
+        "board_ttl_revamp_secs",
+        "board_cache",
+        "revamp_ttl_secs",
+    );
+    move_legacy_key(
+        table,
+        "task_capsule_max_chars",
+        "task_capsules",
+        "max_chars",
+    );
+    move_legacy_key(table, "work_start_hour", "work_hours", "start_hour");
+    move_legacy_key(table, "work_end_hour", "work_hours", "end_hour");
+    move_legacy_key(table, "workdays", "work_hours", "workdays");
+}
+
+fn move_legacy_key(table: &mut toml::Table, key: &str, section: &str, field: &str) {
+    let Some(value) = table.remove(key) else {
+        return;
+    };
+    if key == section && value.is_table() {
+        table.insert(key.to_string(), value);
+        return;
+    }
+    let section = table
+        .entry(section.to_string())
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    if let toml::Value::Table(section) = section {
+        section.entry(field.to_string()).or_insert(value);
+    }
+}
+
 fn apply_config_env(config: &mut Config) {
     if let Some(value) = non_empty_env("MAEH_INCLUDE_EDITOR") {
-        config.include_editor = parse_bool(&value, config.include_editor);
+        config.layout.include_editor = parse_bool(&value, config.layout.include_editor);
     }
     if let Some(value) = non_empty_env("MAEH_FOCUS") {
-        config.focus = parse_bool(&value, config.focus);
+        config.layout.focus = parse_bool(&value, config.layout.focus);
     }
     if let Some(value) = non_empty_env("MAEH_PRIMARY_AGENT_CMD") {
-        config.primary_agent_cmd = value;
+        config.agents.primary_cmd = value;
     }
     if let Some(value) = non_empty_env("MAEH_CRITIC_AGENT_CMD") {
-        config.critic_agent_cmd = value;
+        config.agents.critic_cmd = value;
     }
     if let Some(value) = non_empty_env("MAEH_EDITOR_CMD") {
-        config.editor_cmd = value;
+        config.agents.editor_cmd = value;
     }
 }
 
@@ -224,10 +379,10 @@ pub(crate) fn backend_settings_for_config_env(
     env: &BackendEnv,
 ) -> Result<BackendSettings> {
     Ok(BackendSettings::resolve(
-        config.backend,
-        &config.herdr_bin,
-        &config.tmux_bin,
-        &config.tmux_session,
+        config.backend.kind,
+        &config.backend.herdr_bin,
+        &config.backend.tmux_bin,
+        &config.backend.tmux_session,
         env,
     ))
 }
@@ -264,44 +419,59 @@ fn show_config(home: &Path) -> Result<()> {
     let settings = backend_settings_for_config(&config)?;
     println!("maeh config");
     println!("  home: {}", display(home));
-    println!("  backend: {}", config.backend);
+    println!("  backend: {}", config.backend.kind);
     print_backend_resolution(&settings);
-    println!("  include editor: {}", config.include_editor);
-    println!("  focus: {}", config.focus);
-    println!("  primary agent cmd: {}", config.primary_agent_cmd);
-    println!("  critic agent cmd: {}", config.critic_agent_cmd);
-    println!("  editor cmd: {}", config.editor_cmd);
-    println!("  context switch cap: {}", config.context_switch_cap);
-    println!("  review cap: {}", config.review_cap);
-    println!("  board ttl intake: {}s", config.board_ttl_intake_secs);
-    println!("  board ttl revamp: {}s", config.board_ttl_revamp_secs);
-    println!("  capsule max chars: {}", config.task_capsule_max_chars);
+    println!("  include editor: {}", config.layout.include_editor);
+    println!("  focus: {}", config.layout.focus);
+    println!("  primary agent cmd: {}", config.agents.primary_cmd);
+    println!("  critic agent cmd: {}", config.agents.critic_cmd);
+    println!("  editor cmd: {}", config.agents.editor_cmd);
+    println!("  context switch cap: {}", config.limits.context_switch_cap);
+    println!("  review cap: {}", config.limits.review_cap);
+    println!(
+        "  board ttl intake: {}s",
+        config.board_cache.intake_ttl_secs
+    );
+    println!(
+        "  board ttl revamp: {}s",
+        config.board_cache.revamp_ttl_secs
+    );
+    println!("  capsule max chars: {}", config.task_capsules.max_chars);
     println!(
         "  work hours: {}-{}",
-        config.work_start_hour, config.work_end_hour
+        config.work_hours.start_hour, config.work_hours.end_hour
     );
-    println!("  workdays: {}", join_numbers(&config.workdays));
+    println!("  workdays: {}", join_numbers(&config.work_hours.workdays));
     Ok(())
 }
 
 fn emit_config(home: &Path) -> Result<()> {
     let config = read_config(home)?;
-    println!("MAEH_BACKEND={}", config.backend);
-    println!("MAEH_HERDR_BIN={}", config.herdr_bin);
-    println!("MAEH_TMUX_BIN={}", config.tmux_bin);
-    println!("MAEH_TMUX_SESSION={}", config.tmux_session);
-    println!("MAEH_INCLUDE_EDITOR={}", config.include_editor);
-    println!("MAEH_FOCUS={}", config.focus);
-    println!("MAEH_PRIMARY_AGENT_CMD={}", config.primary_agent_cmd);
-    println!("MAEH_CRITIC_AGENT_CMD={}", config.critic_agent_cmd);
-    println!("MAEH_EDITOR_CMD={}", config.editor_cmd);
-    println!("MAEH_CONTEXT_SWITCH_CAP={}", config.context_switch_cap);
-    println!("MAEH_REVIEW_CAP={}", config.review_cap);
-    println!("MAEH_BOARD_TTL_INTAKE={}", config.board_ttl_intake_secs);
-    println!("MAEH_BOARD_TTL_REVAMP={}", config.board_ttl_revamp_secs);
+    println!("MAEH_BACKEND={}", config.backend.kind);
+    println!("MAEH_HERDR_BIN={}", config.backend.herdr_bin);
+    println!("MAEH_TMUX_BIN={}", config.backend.tmux_bin);
+    println!("MAEH_TMUX_SESSION={}", config.backend.tmux_session);
+    println!("MAEH_INCLUDE_EDITOR={}", config.layout.include_editor);
+    println!("MAEH_FOCUS={}", config.layout.focus);
+    println!("MAEH_PRIMARY_AGENT_CMD={}", config.agents.primary_cmd);
+    println!("MAEH_CRITIC_AGENT_CMD={}", config.agents.critic_cmd);
+    println!("MAEH_EDITOR_CMD={}", config.agents.editor_cmd);
+    println!(
+        "MAEH_CONTEXT_SWITCH_CAP={}",
+        config.limits.context_switch_cap
+    );
+    println!("MAEH_REVIEW_CAP={}", config.limits.review_cap);
+    println!(
+        "MAEH_BOARD_TTL_INTAKE={}",
+        config.board_cache.intake_ttl_secs
+    );
+    println!(
+        "MAEH_BOARD_TTL_REVAMP={}",
+        config.board_cache.revamp_ttl_secs
+    );
     println!(
         "MAEH_TASK_CAPSULE_MAX_CHARS={}",
-        config.task_capsule_max_chars
+        config.task_capsules.max_chars
     );
     Ok(())
 }

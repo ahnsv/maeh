@@ -16,7 +16,7 @@ pub(crate) struct Cli {
         long,
         value_name = "PATH",
         global = true,
-        help = "Use alternate state directory"
+        help = "Override configured home/state directory"
     )]
     pub(crate) home: Option<PathBuf>,
     #[command(subcommand)]

@@ -428,6 +428,10 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(expected);
+    assert_eq!(
+        fs::read_to_string(home.join("config.toml")).unwrap(),
+        "[backend]\nkind = \"auto\"\nherdr_bin = \"herdr\"\ntmux_bin = \"tmux\"\ntmux_session = \"maeh\"\n\n[layout]\ninclude_editor = true\nfocus = false\n\n[agents]\nprimary_cmd = \"codex\"\ncritic_cmd = \"codex\"\neditor_cmd = \"vi\"\n\n[limits]\ncontext_switch_cap = 3\nreview_cap = 5\n\n[board_cache]\nintake_ttl_secs = 3600\nrevamp_ttl_secs = 10800\n\n[task_capsules]\nmax_chars = 1800\n\n[work_hours]\nstart_hour = 9\nend_hour = 17\nworkdays = [\n    1,\n    2,\n    3,\n    4,\n    5,\n]\n"
+    );
     maeh()
         .arg("--home")
         .arg(&home)
@@ -452,6 +456,20 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout("MAEH_BACKEND=auto\nMAEH_HERDR_BIN=herdr\nMAEH_TMUX_BIN=tmux\nMAEH_TMUX_SESSION=maeh\nMAEH_INCLUDE_EDITOR=true\nMAEH_FOCUS=false\nMAEH_PRIMARY_AGENT_CMD=codex\nMAEH_CRITIC_AGENT_CMD=codex\nMAEH_EDITOR_CMD=vi\nMAEH_CONTEXT_SWITCH_CAP=3\nMAEH_REVIEW_CAP=5\nMAEH_BOARD_TTL_INTAKE=3600\nMAEH_BOARD_TTL_REVAMP=10800\nMAEH_TASK_CAPSULE_MAX_CHARS=1800\n");
+    let legacy_home = temp.path().join("legacy-config");
+    fs::create_dir_all(&legacy_home).unwrap();
+    fs::write(
+        legacy_home.join("config.toml"),
+        "backend = 'herdr'\ninclude_editor = false\nprimary_agent_cmd = 'legacy primary'\n",
+    )
+    .unwrap();
+    maeh()
+        .arg("--home")
+        .arg(&legacy_home)
+        .args(["config", "emit"])
+        .assert()
+        .success()
+        .stdout("MAEH_BACKEND=herdr\nMAEH_HERDR_BIN=herdr\nMAEH_TMUX_BIN=tmux\nMAEH_TMUX_SESSION=maeh\nMAEH_INCLUDE_EDITOR=false\nMAEH_FOCUS=false\nMAEH_PRIMARY_AGENT_CMD=legacy primary\nMAEH_CRITIC_AGENT_CMD=codex\nMAEH_EDITOR_CMD=vi\nMAEH_CONTEXT_SWITCH_CAP=3\nMAEH_REVIEW_CAP=5\nMAEH_BOARD_TTL_INTAKE=3600\nMAEH_BOARD_TTL_REVAMP=10800\nMAEH_TASK_CAPSULE_MAX_CHARS=1800\n");
     maeh()
         .arg("--home")
         .arg(&home)
@@ -536,6 +554,10 @@ fn init_config_show_doctor_and_home_resolution() {
             persisted_home.display(),
             default_config.display()
         ));
+    assert_eq!(
+        fs::read_to_string(&default_config).unwrap(),
+        format!("[paths]\nhome = \"{}\"\n", persisted_home.display())
+    );
     maeh()
         .current_dir(&other_cwd)
         .env("MAEH_CONFIG", &default_config)
@@ -581,7 +603,7 @@ fn init_config_show_doctor_and_home_resolution() {
         ));
 
     let relative_config = temp.path().join("relative.toml");
-    fs::write(&relative_config, "home = 'state'\n").unwrap();
+    fs::write(&relative_config, "[paths]\nhome = 'state'\n").unwrap();
     maeh()
         .current_dir(&other_cwd)
         .env("MAEH_CONFIG", &relative_config)
@@ -589,10 +611,22 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!("{}/state/config.toml\n", temp.path().display()));
+    let legacy_relative_config = temp.path().join("legacy-relative.toml");
+    fs::write(&legacy_relative_config, "home = 'legacy-state'\n").unwrap();
+    maeh()
+        .current_dir(&other_cwd)
+        .env("MAEH_CONFIG", &legacy_relative_config)
+        .args(["config", "path"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "{}/legacy-state/config.toml\n",
+            temp.path().display()
+        ));
 
     let fake_home = temp.path().join("fake-home");
     let tilde_config = temp.path().join("tilde.toml");
-    fs::write(&tilde_config, "home = '~'\n").unwrap();
+    fs::write(&tilde_config, "[paths]\nhome = '~'\n").unwrap();
     maeh()
         .env("MAEH_CONFIG", &tilde_config)
         .env("HOME", &fake_home)
@@ -600,7 +634,7 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!("{}/config.toml\n", fake_home.display()));
-    fs::write(&tilde_config, "home = '~/orch'\n").unwrap();
+    fs::write(&tilde_config, "[paths]\nhome = '~/orch'\n").unwrap();
     maeh()
         .env("MAEH_CONFIG", &tilde_config)
         .env("HOME", &fake_home)
@@ -608,7 +642,7 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!("{}/orch/config.toml\n", fake_home.display()));
-    fs::write(&tilde_config, "home = '~'\n").unwrap();
+    fs::write(&tilde_config, "[paths]\nhome = '~'\n").unwrap();
     maeh()
         .env("MAEH_CONFIG", &tilde_config)
         .env_remove("HOME")
@@ -616,7 +650,7 @@ fn init_config_show_doctor_and_home_resolution() {
         .assert()
         .success()
         .stdout(format!("{}/~/config.toml\n", temp.path().display()));
-    fs::write(&tilde_config, "home = '~/orch'\n").unwrap();
+    fs::write(&tilde_config, "[paths]\nhome = '~/orch'\n").unwrap();
     maeh()
         .env("MAEH_CONFIG", &tilde_config)
         .env_remove("HOME")
@@ -700,7 +734,7 @@ fn backend_dry_run_reconciles_tmux_and_herdr_fixtures() {
     init_home(&exec_home);
     fs::write(
         exec_home.join("config.toml"),
-        "backend = 'tmux'\ntmux_bin = '/bin/echo'\n",
+        "[backend]\nkind = 'tmux'\ntmux_bin = '/bin/echo'\n",
     )
     .unwrap();
     maeh()
@@ -713,7 +747,7 @@ fn backend_dry_run_reconciles_tmux_and_herdr_fixtures() {
     init_home(&fail_home);
     fs::write(
         fail_home.join("config.toml"),
-        "backend = 'tmux'\ntmux_bin = '/usr/bin/false'\n",
+        "[backend]\nkind = 'tmux'\ntmux_bin = '/usr/bin/false'\n",
     )
     .unwrap();
     maeh()
@@ -762,7 +796,11 @@ fn backend_dry_run_reconciles_tmux_and_herdr_fixtures() {
 
     let herdr_home = temp.path().join("herdr-state");
     init_home(&herdr_home);
-    fs::write(herdr_home.join("config.toml"), "backend = 'herdr'\n").unwrap();
+    fs::write(
+        herdr_home.join("config.toml"),
+        "[backend]\nkind = 'herdr'\n",
+    )
+    .unwrap();
     maeh()
         .arg("--home")
         .arg(&herdr_home)
@@ -822,7 +860,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
     fs::write(
         home.join("config.toml"),
         format!(
-            "backend = 'herdr'\nherdr_bin = '{}'\ninclude_editor = false\nprimary_agent_cmd = 'codex primary'\ncritic_agent_cmd = 'codex critic'\n",
+            "[backend]\nkind = 'herdr'\nherdr_bin = '{}'\n\n[layout]\ninclude_editor = false\n\n[agents]\nprimary_cmd = 'codex primary'\ncritic_cmd = 'codex critic'\n",
             herdr.display()
         ),
     )
@@ -1058,7 +1096,7 @@ fn live_orchestration_cli_plans_runs_delivers_and_verifies() {
     fs::write(
         home.join("config.toml"),
         format!(
-            "backend = 'herdr'\nherdr_bin = '{}'\n",
+            "[backend]\nkind = 'herdr'\nherdr_bin = '{}'\n",
             fail_herdr.display()
         ),
     )
@@ -1099,7 +1137,7 @@ fn tmux_spawn_run_persists_real_panes_and_delivery_plans_enter() {
     fs::write(
         home.join("config.toml"),
         format!(
-            "backend = 'tmux'\ntmux_bin = '{}'\ntmux_session = 'sess'\ninclude_editor = false\n",
+            "[backend]\nkind = 'tmux'\ntmux_bin = '{}'\ntmux_session = 'sess'\n\n[layout]\ninclude_editor = false\n",
             tmux.display()
         ),
     )
@@ -1145,7 +1183,7 @@ fn kickoff_cli_handles_blockers_and_noops_without_pasting_task_prompt() {
     let temp = TempDir::new().unwrap();
     let home = temp.path().join("state");
     init_home(&home);
-    fs::write(home.join("config.toml"), "backend = 'herdr'\n").unwrap();
+    fs::write(home.join("config.toml"), "[backend]\nkind = 'herdr'\n").unwrap();
     maeh()
         .arg("--home")
         .arg(&home)
@@ -1292,7 +1330,7 @@ fn slot_review_transition_preserves_metadata_and_counts_only_review_cap() {
     init_home(&home);
     fs::write(
         home.join("config.toml"),
-        "backend = 'tmux'\ncontext_switch_cap = 1\nreview_cap = 2\n",
+        "[backend]\nkind = 'tmux'\n\n[limits]\ncontext_switch_cap = 1\nreview_cap = 2\n",
     )
     .unwrap();
     register_slot(
@@ -1597,7 +1635,7 @@ fn slot_exec_contract_uses_backend_and_git_fakes() {
     fs::write(
         home.join("config.toml"),
         format!(
-            "backend = 'tmux'\ntmux_bin = '{}'\nherdr_bin = '{}'\n",
+            "[backend]\nkind = 'tmux'\ntmux_bin = '{}'\nherdr_bin = '{}'\n",
             tmux.display(),
             herdr.display()
         ),
@@ -1674,7 +1712,7 @@ fn slot_spawn_and_agent_contract_cover_aliases_and_exec() {
     fs::write(
         home.join("config.toml"),
         format!(
-            "backend = 'herdr'\nherdr_bin = '{}'\ninclude_editor = true\nprimary_agent_cmd = 'codex primary'\ncritic_agent_cmd = 'codex critic'\neditor_cmd = 'vi edit'\n",
+            "[backend]\nkind = 'herdr'\nherdr_bin = '{}'\n\n[layout]\ninclude_editor = true\n\n[agents]\nprimary_cmd = 'codex primary'\ncritic_cmd = 'codex critic'\neditor_cmd = 'vi edit'\n",
             herdr.display()
         ),
     )
@@ -2438,7 +2476,7 @@ fn capsule_put_get_prompt_and_kickoff_are_exact() {
         .stderr("maeh error: cache miss: https://task\n");
     let tiny = temp.path().join("tiny");
     fs::create_dir_all(&tiny).unwrap();
-    fs::write(tiny.join("config.toml"), "backend = 'auto'\ncontext_switch_cap = 3\nreview_cap = 5\nboard_ttl_intake_secs = 1\nboard_ttl_revamp_secs = 1\ntask_capsule_max_chars = 2\nwork_start_hour = 9\nwork_end_hour = 17\nworkdays = [1,2,3,4,5]\n").unwrap();
+    fs::write(tiny.join("config.toml"), "[backend]\nkind = 'auto'\n\n[limits]\ncontext_switch_cap = 3\nreview_cap = 5\n\n[board_cache]\nintake_ttl_secs = 1\nrevamp_ttl_secs = 1\n\n[task_capsules]\nmax_chars = 2\n\n[work_hours]\nstart_hour = 9\nend_hour = 17\nworkdays = [1,2,3,4,5]\n").unwrap();
     maeh()
         .arg("--home")
         .arg(&tiny)

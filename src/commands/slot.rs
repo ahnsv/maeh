@@ -36,7 +36,7 @@ pub(crate) fn workspace_spawn(home: &Path, args: &mut Vec<String>) -> Result<()>
 pub(crate) fn workspace_register(home: &Path, args: &mut Vec<String>) -> Result<()> {
     let slot = crate::commands::provision::required_flag(args, "--slot")?;
     let config = read_config(home)?;
-    let backend = flag_value(args, "--backend", &config.backend.to_string())?;
+    let backend = flag_value(args, "--backend", &config.backend.kind.to_string())?;
     let workspace = crate::commands::provision::required_flag(args, "--workspace")?;
     let worktree = crate::commands::provision::required_flag(args, "--worktree")?;
     let task_url = flag_value(args, "--task-url", "")?;
@@ -132,7 +132,7 @@ pub(crate) fn slot_spawn_with_label(
     let mut config = read_config(home)?;
     match backend.as_str() {
         "" => {}
-        value => config.backend = value.parse()?,
+        value => config.backend.kind = value.parse()?,
     }
     if !args.iter().any(|arg| arg == "--slot") {
         let default_slot = flag_value(args, "--label", "")?;

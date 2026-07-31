@@ -82,11 +82,18 @@ pub(crate) fn worktree_request(config: &Config, args: &mut Vec<String>) -> Resul
 pub(crate) fn spawn_request(config: &Config, args: &mut Vec<String>) -> Result<SpawnRequest> {
     let task_url = required_flag(args, "--task-url")?;
     let worktree = worktree_request(config, args)?;
-    let primary_arg = flag_value(args, "--primary-cmd", &config.primary_agent_cmd)?;
+    let primary_arg = flag_value(args, "--primary-cmd", &config.agents.primary_cmd)?;
     let primary_agent_cmd = command_words(&primary_arg);
-    let critic_agent_cmd =
-        command_words(&flag_value(args, "--critic-cmd", &config.critic_agent_cmd)?);
-    let editor_cmd = command_words(&flag_value(args, "--editor-cmd", &config.editor_cmd)?);
+    let critic_agent_cmd = command_words(&flag_value(
+        args,
+        "--critic-cmd",
+        &config.agents.critic_cmd,
+    )?);
+    let editor_cmd = command_words(&flag_value(
+        args,
+        "--editor-cmd",
+        &config.agents.editor_cmd,
+    )?);
     Ok(SpawnRequest {
         worktree,
         task_url,
@@ -97,7 +104,7 @@ pub(crate) fn spawn_request(config: &Config, args: &mut Vec<String>) -> Result<S
 }
 
 pub(crate) fn layout_options(config: &Config, args: &mut Vec<String>) -> LayoutOptions {
-    let mut include_editor = config.include_editor;
+    let mut include_editor = config.layout.include_editor;
     if flag_present(args, "--no-editor") {
         include_editor = false;
     }
@@ -110,7 +117,7 @@ pub(crate) fn layout_options(config: &Config, args: &mut Vec<String>) -> LayoutO
             include_editor,
         );
     }
-    let mut focus = config.focus;
+    let mut focus = config.layout.focus;
     if flag_present(args, "--focus") {
         focus = true;
     }

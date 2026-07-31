@@ -106,9 +106,12 @@ fn cap_check(home: &Path) -> Result<()> {
         }
     }
     println!("cap check");
-    println!("  work: {work}/{}", config.context_switch_cap);
-    println!("  review: {review}/{}", config.review_cap);
-    println!("  work available: {}", work < config.context_switch_cap);
-    println!("  review available: {}", review < config.review_cap);
+    println!("  work: {work}/{}", config.limits.context_switch_cap);
+    println!("  review: {review}/{}", config.limits.review_cap);
+    println!(
+        "  work available: {}",
+        work < config.limits.context_switch_cap
+    );
+    println!("  review available: {}", review < config.limits.review_cap);
     Ok(())
 }
