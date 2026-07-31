@@ -64,6 +64,13 @@ Persist a non-default state root once so later worktree invocations do not need 
 maeh --home ~/.claude/orchestrator config set-home
 ```
 
+The user config field is:
+
+```toml
+[paths]
+home = "/absolute/path/to/orchestrator"
+```
+
 If `maeh` installs successfully but your shell cannot find it, add the install directory to `PATH`:
 
 ```bash

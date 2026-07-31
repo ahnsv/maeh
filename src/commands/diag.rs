@@ -31,7 +31,7 @@ pub(crate) fn doctor(home: &Path) -> Result<()> {
     println!("  home: {}", display(home));
     println!("  config: {config_state}");
     println!("  ledger: {}", display(&ledger_dir(home)));
-    println!("  backend: {}", config.backend);
+    println!("  backend: {}", config.backend.kind);
     println!("  selected backend: {}", settings.selected);
     println!("  herdr: {herdr_state}");
     println!("  maeh debug: {debug_state}");
@@ -51,7 +51,7 @@ pub(crate) fn statusline(home: &Path) -> Result<()> {
     }
     println!(
         "maeh W:{}/{} R:{}/{}",
-        work, config.context_switch_cap, review, config.review_cap
+        work, config.limits.context_switch_cap, review, config.limits.review_cap
     );
     Ok(())
 }
@@ -59,9 +59,9 @@ pub(crate) fn statusline(home: &Path) -> Result<()> {
 pub(crate) fn work_hours(home: &Path) -> Result<()> {
     let config = read_config(home)?;
     let (dow, hour) = current_dow_hour();
-    let active = config.workdays.contains(&dow)
-        && hour >= config.work_start_hour
-        && hour < config.work_end_hour;
+    let active = config.work_hours.workdays.contains(&dow)
+        && hour >= config.work_hours.start_hour
+        && hour < config.work_hours.end_hour;
     println!("work-hours");
     println!("  day: {dow}");
     println!("  hour: {hour}");

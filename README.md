@@ -88,15 +88,49 @@ maeh doctor
 maeh selftest
 ```
 
+## Config
+
+Persist the default state root in the user config:
+
+```toml
+[paths]
+home = "~/.claude/orchestrator"
+```
+
+State-specific `config.toml` files are grouped by purpose:
+
+```toml
+[backend]
+kind = "auto"
+tmux_session = "maeh"
+
+[layout]
+include_editor = true
+focus = false
+
+[agents]
+primary_cmd = "codex"
+critic_cmd = "codex"
+editor_cmd = "vi"
+
+[limits]
+context_switch_cap = 3
+review_cap = 5
+```
+
+`--home` overrides both `MAEH_HOME` and the persisted `[paths].home` value.
+
+See [`docs/config.md`](docs/config.md) for the full reference and [`docs/config.example.toml`](docs/config.example.toml) for a copyable sample.
+
 ## Design
 
-- deterministic local state under `--home`, `MAEH_HOME`, a persisted default home (`MAEH_CONFIG`/XDG), or `~/.maeh`
+- deterministic local state under `--home`, `MAEH_HOME`, a persisted default home (`MAEH_CONFIG`/XDG `[paths].home`), or `~/.maeh`
 - line-oriented output that is easy to assert in tests and parse in logs
 - compact task capsules so agents do not repeatedly pull full Notion/Linear/Jira context
 - per-loop board cache TTLs matching the orchestration cadence
 - explicit doctor output for path/config/backend debugging
 - typed backend resolution for `auto|herdr|tmux`, with `MAEH_BACKEND`, `MAEH_HERDR_BIN`, `MAEH_TMUX_BIN`, and `MAEH_TMUX_SESSION` as 12-factor overrides
-- layout and harness configuration via config/env (`include_editor`, `MAEH_INCLUDE_EDITOR`, `MAEH_PRIMARY_AGENT_CMD`, `MAEH_CRITIC_AGENT_CMD`, `MAEH_EDITOR_CMD`)
+- layout and harness configuration via config/env (`[layout].include_editor`, `[agents].primary_cmd`, `MAEH_INCLUDE_EDITOR`, `MAEH_PRIMARY_AGENT_CMD`, `MAEH_CRITIC_AGENT_CMD`, `MAEH_EDITOR_CMD`)
 - dry-run backend discovery/reconciliation that normalizes tmux and Herdr state before planning mutations
 - live worktree/workspace open, primary/critic spawn, slot lifecycle/status/cleanup/revamp/cap wrappers, and worktree removal through Herdr/tmux adapters
 - backend-neutral prompt delivery policy with explicit submit/Enter events and safe Codex trust/update/continue handling

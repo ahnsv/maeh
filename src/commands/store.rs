@@ -49,9 +49,9 @@ fn get_board_cache(home: &Path, key: &str, stale: bool) -> Result<()> {
 
 fn board_ttl(config: &Config, key: &str) -> u64 {
     if key == "revamp" {
-        config.board_ttl_revamp_secs
+        config.board_cache.revamp_ttl_secs
     } else {
-        config.board_ttl_intake_secs
+        config.board_cache.intake_ttl_secs
     }
 }
 
@@ -79,7 +79,7 @@ pub(crate) fn capsule_command(home: &Path, args: &mut Vec<String>) -> Result<()>
 fn put_capsule(home: &Path, url: &str, edited: &str) -> Result<()> {
     let capsule = read_json_stdin()?;
     let raw = capsule.to_string();
-    let max = read_config(home)?.task_capsule_max_chars;
+    let max = read_config(home)?.task_capsules.max_chars;
     if raw.chars().count() > max {
         return Err(MaehError::CapsuleTooLarge {
             actual: raw.chars().count(),

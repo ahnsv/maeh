@@ -8,7 +8,7 @@
 | config initialization | `maeh init` |
 | resolved config display | `maeh config show` |
 | env export bridge | `maeh config emit` |
-| persisted default home | `maeh --home <path> config set-home` |
+| persisted default home | `maeh --home <path> config set-home` writes `[paths].home` |
 | config/state smoke check | `maeh selftest` |
 | append JSONL span | `maeh ledger append --loop <name> --event <event> --target <slot> --data <json>` |
 | list JSONL spans | `maeh ledger list --loop <name>` |
@@ -19,7 +19,7 @@
 | slot worktree lookup | `maeh state worktree <slot>` |
 | slot removal | `maeh state delete-slot <slot>` |
 | hmph statusline pools | `maeh statusline` |
-| backend selection (`auto|tmux|herdr`) | typed config plus `MAEH_BACKEND`, `MAEH_HERDR_BIN`, `MAEH_TMUX_BIN`, `MAEH_TMUX_SESSION` overrides |
+| backend selection (`auto|tmux|herdr`) | typed `[backend]` config plus `MAEH_BACKEND`, `MAEH_HERDR_BIN`, `MAEH_TMUX_BIN`, `MAEH_TMUX_SESSION` overrides |
 | backend discovery plan | `maeh backend plan` |
 | normalized tmux/Herdr discovery | `maeh backend discover --fixture <adapter-output>` or explicit `--exec` |
 | dry-run state reconciliation | `maeh backend reconcile --fixture <adapter-output>` or explicit `--exec` |
