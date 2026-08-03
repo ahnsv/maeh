@@ -14,12 +14,30 @@ maeh aims to be:
 
 maeh tries to achieve following workflow
 
+```mermaid
+flowchart TD
+    T[Tasks] --> P[Plan]
+    P --> E[Execute]
+    E --> R[Review]
+    R -->|pass| G[Gate]
+    R -->|fail| C{change-of-plan}
+    C -->|adjust plan| P
+    C -->|back to fix| E
+    G --> S[Ship &amp; Release]
+```
+
 1. Tasks: this can be either from a tracker (e.g., Linear, Jira, Notion, etc.) or raw natural language. Tasks from trackers are assumed to have its own structure, while natural language lacks enough context by nature. `/maeh-task-to-plan` helps you to fill the context through interview and exploration.
 2. Plan: from task definition, plan step compile it into executable plans. Plan is represented as a tree (plan tree). Plan tree serves as a sequence of work that both agents and humans tracks the progress.
-3. Execute: each node of plan tree is an executable action, translated into workspace. Workspace is a development environment for both agents and human, consisting of editor, primary, and critic. Each workspace creates an increment that corresponds to a node of plan tree, for example, a PR with enough context description and CI pass, a document in a file system, and an artifact that a task defines. Use `/maeh-plan-to-workspaces` to assign workspaces to appropriate code location.
+3. Execute: each node of plan tree is an executable action, translated into workspace. Workspace is a development environment for both agents and human, consisting of editor, primary, and critic (see definitions below). Each workspace creates an increment that corresponds to a node of plan tree, for example, a PR with enough context description and CI pass, a document in a file system, and an artifact that a task defines. Use `/maeh-plan-to-workspaces` to assign workspaces to appropriate code location.
 4. Review: an agent reviews increments individually and as a whole. Use `/maeh-review-the-increments` to follow pre-existing guidelines per repo and custom review guardrails. If review verdict is failure, use `/maeh-change-of-plan` to adjust plan or bring it back to execute to make some fixes.
 5. Gate: a human gate that reviews the work holistically. This is enabled by a one-page gate summary, where it specifies context of this specific increments in the context of current plan tree, what to check, what's ask from agents, and what's change agents made in a nutshell. The summary one-pager has to be interactive by nature. Gate reviewer should be able to leave inline comments. Use `/maeh-move-to-gate` to pull this off.
 6. Ship & Release: Interact with external world. It can be GH PR creation, change sharing configuration so other people in the team can see, and so forth.
+
+Key terms:
+
+- **Workspace**: a development environment that can vary by backend. Supported backends: herdr, tmux (for now).
+- **Primary**: an agent instance that does the work. Confers with the critic on its execution, and runs multiple subagents to parallelize tasks — test, cosmetics, documentation, etc.
+- **Critic**: an agent instance that critiques the primary's work. Confers with the primary to keep the guardrails and ensure quality of increments.
 
 Following components are to achieve self-improvement of workflow:
 
@@ -39,6 +57,22 @@ maeh consists of two parts in code:
 
 1. CLI with rich TUI
 2. Agent skills
+
+### Plan tree
+
+The TUI renders the plan tree live — color-coded status icons, and `Enter` (or click) on a node opens its workspace.
+
+```
+◐ redefine maeh
+├── ✔ task-to-plan
+├── ◐ plan-to-workspaces
+│   ├── ✔ spike TUI
+│   └── ○ wire backend
+├── ○ review-the-increments
+└── ✗ move-to-gate
+
+✔ done   ◐ running   ○ todo   ✗ failed
+```
 
 ## Design principle
 
