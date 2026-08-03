@@ -1,147 +1,47 @@
 # maeh
 
-`maeh` is a Rust CLI for the hmph/Herdr orchestration workflow. It replaces the
-fragile bash helper surface with a typed command interface, structured output,
-local tracker caches, compact task capsules, and a small doctor command for
-operator debugging.
+a maestro that orchestrates mass of agents.
 
-## Install
+## Goal
 
-Install the latest released binary:
+maeh aims to be:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ahnsv/maeh/main/install.sh | bash
-```
+1. an agent orchestration with extreme efficiency. metrics to track: token per day (initial goal: 1K per day except skills and tool load)
+2. a self-improving workflow manager, open to changes of paradigms, and opinionated tool for modern SWEs
+3. simplest AI coding harness agnostic tooling.
 
-The release workflow also publishes the installer as a release asset, so this
-works after the next tagged release that includes `install.sh`:
+## Principle
 
-```bash
-curl -fsSL https://github.com/ahnsv/maeh/releases/latest/download/install.sh | bash
-```
+maeh tries to achieve following workflow
 
-The repository is public, so no GitHub token is required. By default the
-installer writes `maeh` to `~/.local/bin` and verifies the binary against the
-release checksum before installing it. Use `--dir` to choose another location:
+1. Tasks: this can be either from a tracker (e.g., Linear, Jira, Notion, etc.) or raw natural language. Tasks from trackers are assumed to have its own structure, while natural language lacks enough context by nature. `/maeh-task-to-plan` helps you to fill the context through interview and exploration.
+2. Plan: from task definition, plan step compile it into executable plans. Plan is represented as a tree (plan tree). Plan tree serves as a sequence of work that both agents and humans tracks the progress.
+3. Execute: each node of plan tree is an executable action, translated into workspace. Workspace is a development environment for both agents and human, consisting of editor, primary, and critic. Each workspace creates an increment that corresponds to a node of plan tree, for example, a PR with enough context description and CI pass, a document in a file system, and an artifact that a task defines. Use `/maeh-plan-to-workspaces` to assign workspaces to appropriate code location.
+4. Review: an agent reviews increments individually and as a whole. Use `/maeh-review-the-increments` to follow pre-existing guidelines per repo and custom review guardrails. If review verdict is failure, use `/maeh-change-of-plan` to adjust plan or bring it back to execute to make some fixes.
+5. Gate: a human gate that reviews the work holistically. This is enabled by a one-page gate summary, where it specifies context of this specific increments in the context of current plan tree, what to check, what's ask from agents, and what's change agents made in a nutshell. The summary one-pager has to be interactive by nature. Gate reviewer should be able to leave inline comments. Use `/maeh-move-to-gate` to pull this off.
+6. Ship & Release: Interact with external world. It can be GH PR creation, change sharing configuration so other people in the team can see, and so forth.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ahnsv/maeh/main/install.sh | bash -s -- --dir /usr/local/bin
-```
+Following components are to achieve self-improvement of workflow:
 
-Pin a release with `MAEH_VERSION` or `--version`:
+- Configs: Default location is `~/.maeh/config.toml` ($MAEH_HOME/config.toml)
+- Agents: `~/.maeh/agents/<agent-name>/AGENT.md` serves as a centralized agent instruction location.
+- Memory: an external memory layer defined by harness setting. If this is configured, you can look up memory
+- Logs (read-only): every CLI invocation is logged in `~/.maeh/logs/<YYYY-MM-DD.log>`. logging config logs plan ID and node ID to pair them
+- Metrics (read-only): CLI telemetry logs metrics in JSON to `~/.maeh/metrics/<metric-name>/<YYYY-MM-DD.jsonl>`. This metrics are aggregated using duckdb.
+- Retro handoff (read-only): each workflow run emits a short retro handoff note in markdown.
+- Past improvement note: a one-paragraph note about past improvement. `~/.maeh/improvements/<YYYY-MM-DD.md>`
 
-```bash
-MAEH_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/ahnsv/maeh/main/install.sh | bash
-# or
-curl -fsSL https://raw.githubusercontent.com/ahnsv/maeh/main/install.sh | bash -s -- --version v0.1.0
-```
+`/maeh-improve-the-workflow` uses the source above to find a way to improve next workflow run. Each improvement needs a clear goal with problems to address and evidence of improvement, success criteria. The subsequent improvement should revisit the previous improvement note to validate the change's claim.
 
-Verify:
+## Presentation
 
-```bash
-maeh --help
-maeh doctor
-```
+maeh consists of two parts in code:
 
-## Commands
+1. CLI with rich TUI
+2. Agent skills
 
-```text
-maeh init
-maeh config path
-maeh config show
-maeh config emit
-maeh --home ~/.claude/orchestrator config set-home
-maeh ledger append --loop daily --event run_start --target w1 --data '{}'
-maeh ledger list --loop daily
-maeh state tag w1 task_url https://example/task
-maeh state list
-maeh board-cache put --key intake < board.json
-maeh board-cache get --key intake
-maeh capsule put <url> --edited <timestamp> < capsule.json
-maeh capsule prompt <url>
-maeh prompt kickoff --url <task-url>
-maeh backend plan
-maeh backend discover --fixture <adapter-output>
-maeh backend reconcile --fixture <adapter-output>
-maeh backend reconcile --exec
-maeh backend list-task-slots  # slot task_url status snooze_until age_secs label primary_pane critic_pane worktree
-maeh backend list-worktrees
-maeh worktree plan --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor
-maeh worktree open --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --create
-maeh slot spawn --backend herdr --slot w1 --repo . --branch ha-feat-task --path .worktrees/task --task-url https://example/task --editor false --exec
-maeh slot verify w1
-maeh slot close w1 --exec
-maeh slot worktree-remove w1 --exec
-maeh slot count --status active,blocked
-maeh slot snooze w1 --days 1 --status blocked
-maeh slot block w1 --reason "waiting"
-maeh spawn plan --slot w1 --task-url https://example/task --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor
-maeh spawn run --slot w1 --task-url https://example/task --repo . --branch ha-feat-task --path .worktrees/task --create --no-editor
-maeh agent deliver w1:p2 "Do the task" --exec
-maeh kickoff plan --target w1:p2 --prompt "Do the task"
-maeh kickoff run --slot w1 --prompt "Do the task"
-maeh verify prompt --before "› Do the task" --after "Working" --prompt "Do the task"
-maeh status list
-maeh statusline
-maeh work-hours
-maeh doctor
-maeh selftest
-```
+## Design principle
 
-## Config
-
-Persist the default state root in the user config:
-
-```toml
-[paths]
-home = "~/.claude/orchestrator"
-```
-
-State-specific `config.toml` files are grouped by purpose:
-
-```toml
-[backend]
-kind = "auto"
-tmux_session = "maeh"
-
-[layout]
-include_editor = true
-focus = false
-
-[agents]
-primary_cmd = "codex"
-critic_cmd = "codex"
-editor_cmd = "vi"
-
-[limits]
-context_switch_cap = 3
-review_cap = 5
-```
-
-`--home` overrides both `MAEH_HOME` and the persisted `[paths].home` value.
-
-See [`docs/config.md`](docs/config.md) for the full reference and [`docs/config.example.toml`](docs/config.example.toml) for a copyable sample.
-
-## Design
-
-- deterministic local state under `--home`, `MAEH_HOME`, a persisted default home (`MAEH_CONFIG`/XDG `[paths].home`), or `~/.maeh`
-- line-oriented output that is easy to assert in tests and parse in logs
-- compact task capsules so agents do not repeatedly pull full Notion/Linear/Jira context
-- per-loop board cache TTLs matching the orchestration cadence
-- explicit doctor output for path/config/backend debugging
-- typed backend resolution for `auto|herdr|tmux`, with `MAEH_BACKEND`, `MAEH_HERDR_BIN`, `MAEH_TMUX_BIN`, and `MAEH_TMUX_SESSION` as 12-factor overrides
-- layout and harness configuration via config/env (`[layout].include_editor`, `[agents].primary_cmd`, `MAEH_INCLUDE_EDITOR`, `MAEH_PRIMARY_AGENT_CMD`, `MAEH_CRITIC_AGENT_CMD`, `MAEH_EDITOR_CMD`)
-- dry-run backend discovery/reconciliation that normalizes tmux and Herdr state before planning mutations
-- live worktree/workspace open, primary/critic spawn, slot lifecycle/status/cleanup/revamp/cap wrappers, and worktree removal through Herdr/tmux adapters
-- backend-neutral prompt delivery policy with explicit submit/Enter events and safe Codex trust/update/continue handling
-
-See `docs/bash-helper-parity.md` for the mapped Bash helper surface and `docs/installation.md` for install options.
-
-## Development
-
-```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-cargo llvm-cov --all-targets --all-features --fail-under-lines 100 --fail-under-functions 100
-```
+1. Simplicity over architectural perfectionism
+2. DRY
+3. Graphics over lengthy text
