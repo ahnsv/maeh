@@ -41,7 +41,7 @@ skills/<stage>/SKILL.md            # six skills
 tests/...                          # one test module per core module + boundary
 ```
 
-**Responsibilities:** `models` = data + id validation; `plan` = pure tree ops; `fsutil` = private/atomic filesystem primitives; `config`/`store` = IO at the `$MAEH_HOME` boundary (`store` also owns concurrency via a per-plan lock); `workspace` = side-effecting tmux dispatch (herdr added later, behind a protocol, only when it's real); `telemetry` = append-only structured logs/metrics; `cli/*` = collect `--set` overrides, render results in the chosen format, route input — zero rules.
+**Responsibilities:** `models` = data + id validation; `plan` = pure tree ops; `fsutil` = private/atomic filesystem primitives; `config`/`store` = IO at the `$MAEH_HOME` boundary (`store` also owns concurrency via a per-plan lock); `workspace` = side-effecting backend dispatch (tmux + herdr, plain dict); `telemetry` = append-only structured logs/metrics; `cli/*` = collect `--set` overrides, render results in the chosen format, route input — zero rules.
 
 ---
 
@@ -108,24 +108,36 @@ asyncio_mode = "auto"
 import pytest
 from maeh.core.models import Status, Node, PlanTree, require_safe_segment
 
+
 def _tree():
-    return PlanTree(Node("r", "root", children=[
-        Node("a", "a", Status.DONE),
-        Node("b", "b", children=[Node("b1", "b1")]),
-    ]))
+    return PlanTree(
+        Node(
+            "r",
+            "root",
+            children=[
+                Node("a", "a", Status.DONE),
+                Node("b", "b", children=[Node("b1", "b1")]),
+            ],
+        )
+    )
+
 
 def test_find_returns_node_by_id():
     assert _tree().find("b1").name == "b1"
 
+
 def test_find_missing_returns_none():
     assert _tree().find("nope") is None
+
 
 def test_walk_is_preorder():
     assert [n.id for n in _tree().walk()] == ["r", "a", "b", "b1"]
 
+
 def test_node_id_rejects_path_traversal():
     with pytest.raises(ValueError):
         Node("../../etc/passwd", "evil")
+
 
 def test_require_safe_segment_allows_dotted_ids():
     assert require_safe_segment("plan-1.2.1") == "plan-1.2.1"
@@ -146,10 +158,12 @@ from enum import Enum
 # Rejects "..", leading/trailing dots, slashes — safe as a filename segment.
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$")
 
+
 def require_safe_segment(value: str) -> str:
     if not _SAFE_SEGMENT.fullmatch(value):
         raise ValueError(f"unsafe identifier: {value!r}")
     return value
+
 
 class Status(str, Enum):
     TODO = "todo"
@@ -157,22 +171,25 @@ class Status(str, Enum):
     DONE = "done"
     FAILED = "failed"
 
+
 @dataclass
 class Node:
     id: str
     name: str
     status: Status = Status.TODO
-    path: str | None = None   # code location the node's workspace opens in
+    path: str | None = None  # code location the node's workspace opens in
     children: list["Node"] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         require_safe_segment(self.id)
 
+
 @dataclass
 class Increment:
     node_id: str
-    kind: str          # "pr" | "document" | "artifact"
-    ref: str           # URL / path / id
+    kind: str  # "pr" | "document" | "artifact"
+    ref: str  # URL / path / id
+
 
 @dataclass
 class PlanTree:
@@ -210,14 +227,17 @@ import pytest
 from maeh.core.models import Node, PlanTree, Status
 from maeh.core.plan import set_status, add_child
 
+
 def test_set_status_updates_node():
     t = PlanTree(Node("r", "root"))
     set_status(t, "r", Status.DONE)
     assert t.root.status is Status.DONE
 
+
 def test_set_status_unknown_id_raises():
     with pytest.raises(KeyError):
         set_status(PlanTree(Node("r", "root")), "x", Status.DONE)
+
 
 def test_add_child_attaches():
     t = PlanTree(Node("r", "root"))
@@ -232,14 +252,17 @@ def test_add_child_attaches():
 # src/maeh/core/plan.py
 from maeh.core.models import Node, PlanTree, Status
 
+
 def _require(tree: PlanTree, node_id: str) -> Node:
     node = tree.find(node_id)
     if node is None:
         raise KeyError(node_id)
     return node
 
+
 def set_status(tree: PlanTree, node_id: str, status: Status) -> None:
     _require(tree, node_id).status = status
+
 
 def add_child(tree: PlanTree, parent_id: str, child: Node) -> None:
     _require(tree, parent_id).children.append(child)
@@ -259,7 +282,7 @@ def add_child(tree: PlanTree, parent_id: str, child: Node) -> None:
 - Test: `tests/core/test_config.py`
 
 **Interfaces:**
-- Produces: `AgentsConfig(primary_cmd:str, critic_cmd:str, editor_cmd:str)`; `TuiConfig(status_format: dict[str, tuple[str, str]])` (status value → `(icon, color)`); `ReviewConfig(guardrails: list[str])`; `LimitsConfig(max_concurrent_workspaces:int)`; `Config(maeh_home:Path, backend:str, agents:AgentsConfig, tui:TuiConfig, review:ReviewConfig, limits:LimitsConfig)`; `load_config(home: Path | None = None, overrides: list[str] | None = None) -> Config`; `config_to_dict(cfg:Config) -> dict` (toml-shaped, for `-o`). Resolution order for home: arg → `$MAEH_HOME` → `~/.maeh` (single home config; no separate user config in v1). Missing `config.toml` → all defaults. Config values override defaults key-by-key. `overrides` are Helm-style `path.key=value` strings, coerced (`true/false`→bool, int, float, `a,b`→list, else str) and deep-set into the parsed data before dataclass construction — so `--set core.backend=herdr` is validated too. `backend` is validated against `_IMPLEMENTED_BACKENDS = {"tmux"}`; any other value raises `ValueError` (honest knob — no silent fallback). See `docs/config.example.toml`.
+- Produces: `AgentsConfig(primary_cmd:str, critic_cmd:str, editor_cmd:str)`; `TuiConfig(status_format: dict[str, tuple[str, str]])` (status value → `(icon, color)`); `ReviewConfig(guardrails: list[str])`; `LimitsConfig(max_concurrent_workspaces:int)`; `Config(maeh_home:Path, backend:str, agents:AgentsConfig, tui:TuiConfig, review:ReviewConfig, limits:LimitsConfig)`; `load_config(home: Path | None = None, overrides: list[str] | None = None) -> Config`; `config_to_dict(cfg:Config) -> dict` (toml-shaped, for `-o`). Resolution order for home: arg → `$MAEH_HOME` → `~/.maeh` (single home config; no separate user config in v1). Missing `config.toml` → all defaults. Config values override defaults key-by-key. `overrides` are Helm-style `path.key=value` strings, coerced (`true/false`→bool, int, float, `a,b`→list, else str) and deep-set into the parsed data before dataclass construction — so `--set core.backend=screen` is validated too. `backend` is validated against `workspace.SUPPORTED_BACKENDS` (`{"tmux", "herdr"}`); any other value raises `ValueError` (honest knob — no silent fallback). See `docs/config.example.toml`.
 
 - [ ] **Step 1: Failing test**
 
@@ -268,12 +291,14 @@ def add_child(tree: PlanTree, parent_id: str, child: Node) -> None:
 import pytest
 from maeh.core.config import load_config, config_to_dict
 
+
 def test_defaults_when_no_file(tmp_path):
     cfg = load_config(tmp_path)
     assert cfg.backend == "tmux"
     assert cfg.agents.primary_cmd == "claude"
     assert cfg.tui.status_format["done"] == ("✔", "green")
     assert cfg.limits.max_concurrent_workspaces == 3
+
 
 def test_file_overrides(tmp_path):
     (tmp_path / "config.toml").write_text(
@@ -283,26 +308,39 @@ def test_file_overrides(tmp_path):
     )
     cfg = load_config(tmp_path)
     assert cfg.agents.primary_cmd == "codex"
-    assert cfg.agents.critic_cmd == "claude"          # untouched default kept
+    assert cfg.agents.critic_cmd == "claude"  # untouched default kept
     assert cfg.tui.status_format["done"] == ("✓", "cyan")
     assert cfg.tui.status_format["failed"] == ("✗", "red")  # untouched default kept
     assert cfg.review.guardrails == ["g.md"]
 
-def test_unimplemented_backend_rejected(tmp_path):
+
+def test_herdr_backend_is_supported(tmp_path):
     (tmp_path / "config.toml").write_text('[core]\nbackend = "herdr"\n')
+    assert load_config(tmp_path).backend == "herdr"
+
+
+def test_unsupported_backend_rejected(tmp_path):
+    (tmp_path / "config.toml").write_text('[core]\nbackend = "screen"\n')
     with pytest.raises(ValueError):
         load_config(tmp_path)
 
+
 def test_set_overrides_apply_and_coerce(tmp_path):
-    cfg = load_config(tmp_path, overrides=[
-        "agents.primary_cmd=codex", "limits.max_concurrent_workspaces=5",
-    ])
-    assert cfg.agents.primary_cmd == "codex"          # no file needed
-    assert cfg.limits.max_concurrent_workspaces == 5   # coerced to int
+    cfg = load_config(
+        tmp_path,
+        overrides=[
+            "agents.primary_cmd=codex",
+            "limits.max_concurrent_workspaces=5",
+        ],
+    )
+    assert cfg.agents.primary_cmd == "codex"  # no file needed
+    assert cfg.limits.max_concurrent_workspaces == 5  # coerced to int
+
 
 def test_set_override_backend_is_validated(tmp_path):
     with pytest.raises(ValueError):
-        load_config(tmp_path, overrides=["core.backend=herdr"])
+        load_config(tmp_path, overrides=["core.backend=screen"])
+
 
 def test_config_to_dict_roundtrips_shape(tmp_path):
     d = config_to_dict(load_config(tmp_path))
@@ -320,13 +358,15 @@ import os, tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from maeh.core.workspace import SUPPORTED_BACKENDS
+
 _DEFAULT_STATUS_FORMAT = {
     "done": ("✔", "green"),
     "running": ("◐", "yellow"),
     "todo": ("○", "grey50"),
     "failed": ("✗", "red"),
 }
-_IMPLEMENTED_BACKENDS = {"tmux"}   # add "herdr" when it lands (SPEC §10 Q4)
+
 
 @dataclass
 class AgentsConfig:
@@ -334,19 +374,23 @@ class AgentsConfig:
     critic_cmd: str = "claude"
     editor_cmd: str = "nvim"
 
+
 @dataclass
 class TuiConfig:
     status_format: dict[str, tuple[str, str]] = field(
         default_factory=lambda: dict(_DEFAULT_STATUS_FORMAT)
     )
 
+
 @dataclass
 class ReviewConfig:
     guardrails: list[str] = field(default_factory=list)
 
+
 @dataclass
 class LimitsConfig:
     max_concurrent_workspaces: int = 3
+
 
 @dataclass
 class Config:
@@ -357,11 +401,13 @@ class Config:
     review: ReviewConfig = field(default_factory=ReviewConfig)
     limits: LimitsConfig = field(default_factory=LimitsConfig)
 
+
 def resolve_home(home: Path | None = None) -> Path:
     if home is not None:
         return home
     env = os.environ.get("MAEH_HOME")
     return Path(env) if env else Path.home() / ".maeh"
+
 
 def _coerce(raw: str):
     low = raw.lower()
@@ -376,6 +422,7 @@ def _coerce(raw: str):
             pass
     return raw
 
+
 def _apply_overrides(data: dict, overrides: list[str]) -> None:
     for item in overrides:
         if "=" not in item:
@@ -389,6 +436,7 @@ def _apply_overrides(data: dict, overrides: list[str]) -> None:
                 raise ValueError(f"override path {path!r} hits a non-table value")
         node[keys[-1]] = _coerce(raw)
 
+
 def load_config(home: Path | None = None, overrides: list[str] | None = None) -> Config:
     root = resolve_home(home)
     cfg = Config(maeh_home=root)
@@ -398,9 +446,9 @@ def load_config(home: Path | None = None, overrides: list[str] | None = None) ->
         _apply_overrides(data, overrides)
 
     cfg.backend = data.get("core", {}).get("backend", cfg.backend)
-    if cfg.backend not in _IMPLEMENTED_BACKENDS:
+    if cfg.backend not in SUPPORTED_BACKENDS:
         raise ValueError(
-            f"backend {cfg.backend!r} not implemented; available: {sorted(_IMPLEMENTED_BACKENDS)}"
+            f"backend {cfg.backend!r} not supported; available: {sorted(SUPPORTED_BACKENDS)}"
         )
 
     agents = data.get("agents", {})
@@ -423,13 +471,18 @@ def load_config(home: Path | None = None, overrides: list[str] | None = None) ->
     )
     return cfg
 
+
 def config_to_dict(cfg: Config) -> dict:
     return {
         "core": {"backend": cfg.backend},
-        "agents": {"primary_cmd": cfg.agents.primary_cmd,
-                   "critic_cmd": cfg.agents.critic_cmd,
-                   "editor_cmd": cfg.agents.editor_cmd},
-        "tui": {"status_format": {k: list(v) for k, v in cfg.tui.status_format.items()}},
+        "agents": {
+            "primary_cmd": cfg.agents.primary_cmd,
+            "critic_cmd": cfg.agents.critic_cmd,
+            "editor_cmd": cfg.agents.editor_cmd,
+        },
+        "tui": {
+            "status_format": {k: list(v) for k, v in cfg.tui.status_format.items()}
+        },
         "review": {"guardrails": cfg.review.guardrails},
         "limits": {"max_concurrent_workspaces": cfg.limits.max_concurrent_workspaces},
     }
@@ -456,9 +509,11 @@ def config_to_dict(cfg: Config) -> dict:
 import stat
 from maeh.core.fsutil import private_subdir, write_private
 
+
 def test_private_subdir_is_0700(tmp_path):
     d = private_subdir(tmp_path, "plans")
     assert stat.S_IMODE((tmp_path / "plans").stat().st_mode) == 0o700
+
 
 def test_write_private_is_0600_and_atomic(tmp_path):
     p = tmp_path / "f.json"
@@ -474,23 +529,34 @@ from maeh.core.models import Node, PlanTree, Status
 from maeh.core.plan import set_status
 from maeh.core.store import save_plan, load_plan, update_plan, plan_to_dict
 
+
 def test_round_trip(tmp_path):
-    t = PlanTree(Node("p1", "root", Status.RUNNING, path="services/api",
-                      children=[Node("c", "child", Status.DONE)]))
+    t = PlanTree(
+        Node(
+            "p1",
+            "root",
+            Status.RUNNING,
+            path="services/api",
+            children=[Node("c", "child", Status.DONE)],
+        )
+    )
     save_plan(t, tmp_path)
     got = load_plan("p1", tmp_path)
     assert got.root.children[0].status is Status.DONE
     assert got.root.name == "root"
     assert got.root.path == "services/api"
 
+
 def test_load_plan_rejects_traversal(tmp_path):
     with pytest.raises(ValueError):
         load_plan("../../../etc/passwd", tmp_path)
+
 
 def test_update_plan_locks_load_mutate_save(tmp_path):
     save_plan(PlanTree(Node("p1", "root")), tmp_path)
     update_plan(tmp_path, "p1", lambda t: set_status(t, "p1", Status.DONE))
     assert load_plan("p1", tmp_path).root.status is Status.DONE
+
 
 def test_plan_to_dict(tmp_path):
     d = plan_to_dict(PlanTree(Node("p1", "root", Status.DONE)))
@@ -506,6 +572,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+
 def private_subdir(home: Path, *parts: str) -> Path:
     d = home
     d.mkdir(parents=True, exist_ok=True)
@@ -516,12 +583,14 @@ def private_subdir(home: Path, *parts: str) -> Path:
         d.chmod(0o700)
     return d
 
+
 def write_private(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(text)
-    os.replace(tmp, path)          # atomic; old file intact on crash
+    os.replace(tmp, path)  # atomic; old file intact on crash
+
 
 def append_private(path: Path, line: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -539,27 +608,43 @@ from pathlib import Path
 from maeh.core.fsutil import private_subdir, write_private
 from maeh.core.models import Node, PlanTree, Status, require_safe_segment
 
+
 def _to_dict(node: Node) -> dict:
-    return {"id": node.id, "name": node.name, "status": node.status.value,
-            "path": node.path, "children": [_to_dict(c) for c in node.children]}
+    return {
+        "id": node.id,
+        "name": node.name,
+        "status": node.status.value,
+        "path": node.path,
+        "children": [_to_dict(c) for c in node.children],
+    }
+
 
 def _from_dict(d: dict) -> Node:
-    return Node(id=d["id"], name=d["name"], status=Status(d["status"]),
-                path=d.get("path"), children=[_from_dict(c) for c in d["children"]])
+    return Node(
+        id=d["id"],
+        name=d["name"],
+        status=Status(d["status"]),
+        path=d.get("path"),
+        children=[_from_dict(c) for c in d["children"]],
+    )
+
 
 def plan_to_dict(tree: PlanTree) -> dict:
     return _to_dict(tree.root)
 
+
 def save_plan(tree: PlanTree, home: Path) -> Path:
     plans = private_subdir(home, "plans")
-    path = plans / f"{tree.root.id}.json"          # root.id validated in __post_init__
+    path = plans / f"{tree.root.id}.json"  # root.id validated in __post_init__
     write_private(path, json.dumps(_to_dict(tree.root), ensure_ascii=False, indent=2))
     return path
+
 
 def load_plan(plan_id: str, home: Path) -> PlanTree:
     require_safe_segment(plan_id)
     path = home / "plans" / f"{plan_id}.json"
     return PlanTree(_from_dict(json.loads(path.read_text())))
+
 
 @contextmanager
 def _plan_lock(home: Path, plan_id: str):
@@ -573,7 +658,10 @@ def _plan_lock(home: Path, plan_id: str):
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
 
-def update_plan(home: Path, plan_id: str, mutate: Callable[[PlanTree], None]) -> PlanTree:
+
+def update_plan(
+    home: Path, plan_id: str, mutate: Callable[[PlanTree], None]
+) -> PlanTree:
     """The single writer: lock, load, mutate, atomically save. All plan
     mutations route through here so concurrent primary/critic can't lose updates."""
     with _plan_lock(home, plan_id):
@@ -590,11 +678,15 @@ def update_plan(home: Path, plan_id: str, mutate: Callable[[PlanTree], None]) ->
 
 ## Phase 3 — Workspace backends
 
-### Task 5: Workspace (tmux)
+### Task 5: Workspace (tmux + herdr)
 
-Only tmux is real in v1, so there is no backend protocol or registry — one direct
-function. Add a `WorkspaceBackend` protocol and a dispatch dict only when `herdr`
-is actually implemented (SPEC §10 Q4).
+Two backends via a plain `{"tmux": …, "herdr": …}` dict dispatch — no protocol or
+registry. tmux is idempotent via `new-session -A`; herdr has no attach-or-create,
+so `_open_herdr` does find-or-create: `herdr workspace list` → reuse the workspace
+whose `label == maeh-<node.id>`, else `herdr workspace create --cwd … --label … --no-focus`
+and read `result.workspace.workspace_id`. `SUPPORTED_BACKENDS` is the single source
+of truth that `config` validates against. (Code below shows the tmux path; see
+`src/maeh/core/workspace.py` for the full two-backend implementation.)
 
 **Files:**
 - Create: `src/maeh/core/workspace.py`
@@ -611,6 +703,7 @@ is actually implemented (SPEC §10 Q4).
 from pathlib import Path
 from maeh.core.models import Node
 from maeh.core.workspace import open_workspace, WorkspaceHandle
+
 
 def test_open_workspace_creates_session_named_by_node_id():
     calls = []
@@ -632,14 +725,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from maeh.core.models import Node
 
+
 @dataclass(frozen=True)
 class WorkspaceHandle:
     node_id: str
     backend: str
     ref: str
 
+
 def _run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
+
 
 def open_workspace(
     node: Node, cwd: Path, runner: Callable[[list[str]], None] = _run
@@ -675,22 +771,34 @@ from maeh.core.telemetry import log, emit_metric
 
 TS = "2026-08-03T09:15:00Z"
 
+
 def test_log_writes_structured_record(tmp_path):
     log(tmp_path, "started", plan_id="p1", node_id="n1", ts=TS, event="execute")
     rec = json.loads((tmp_path / "logs" / "2026-08-03.jsonl").read_text().strip())
-    assert rec == {"ts": TS, "level": "info", "event": "execute",
-                   "plan_id": "p1", "node_id": "n1", "message": "started"}
+    assert rec == {
+        "ts": TS,
+        "level": "info",
+        "event": "execute",
+        "plan_id": "p1",
+        "node_id": "n1",
+        "message": "started",
+    }
+
 
 def test_log_record_survives_newlines_in_message(tmp_path):
     log(tmp_path, "a\nfake forged", plan_id="p1", node_id="n1", ts=TS)
     lines = (tmp_path / "logs" / "2026-08-03.jsonl").read_text().splitlines()
     assert len(lines) == 1 and json.loads(lines[0])["message"] == "a\nfake forged"
 
+
 def test_emit_metric_appends_jsonl(tmp_path):
     emit_metric(tmp_path, "tokens", {"n": 42}, ts=TS)
     emit_metric(tmp_path, "tokens", {"n": 7}, ts=TS)
-    lines = (tmp_path / "metrics" / "tokens" / "2026-08-03.jsonl").read_text().splitlines()
+    lines = (
+        (tmp_path / "metrics" / "tokens" / "2026-08-03.jsonl").read_text().splitlines()
+    )
     assert [json.loads(l)["n"] for l in lines] == [42, 7]
+
 
 def test_emit_metric_rejects_unsafe_name(tmp_path):
     with pytest.raises(ValueError):
@@ -708,17 +816,36 @@ from pathlib import Path
 from maeh.core.fsutil import append_private, private_subdir
 from maeh.core.models import require_safe_segment
 
-def log(home: Path, message: str, *, plan_id: str, node_id: str,
-        ts: str, level: str = "info", event: str = "log") -> None:
+
+def log(
+    home: Path,
+    message: str,
+    *,
+    plan_id: str,
+    node_id: str,
+    ts: str,
+    level: str = "info",
+    event: str = "log",
+) -> None:
     d = private_subdir(home, "logs")
-    rec = {"ts": ts, "level": level, "event": event,
-           "plan_id": plan_id, "node_id": node_id, "message": message}
+    rec = {
+        "ts": ts,
+        "level": level,
+        "event": event,
+        "plan_id": plan_id,
+        "node_id": node_id,
+        "message": message,
+    }
     append_private(d / f"{ts[:10]}.jsonl", json.dumps(rec, ensure_ascii=False) + "\n")
 
+
 def emit_metric(home: Path, name: str, value: dict, *, ts: str) -> None:
-    require_safe_segment(name)             # name is interpolated into the path
+    require_safe_segment(name)  # name is interpolated into the path
     d = private_subdir(home, "metrics", name)
-    append_private(d / f"{ts[:10]}.jsonl", json.dumps({"ts": ts, **value}, ensure_ascii=False) + "\n")
+    append_private(
+        d / f"{ts[:10]}.jsonl",
+        json.dumps({"ts": ts, **value}, ensure_ascii=False) + "\n",
+    )
 ```
 
 - [ ] **Step 4: Run** → PASS.
@@ -746,9 +873,11 @@ from maeh.core.models import Node, Status
 from maeh.core.config import TuiConfig
 from maeh.cli.widgets.plan_tree import format_label
 
+
 def test_format_label_uses_status_format():
     fmt = TuiConfig().status_format
     assert format_label(Node("i", "task", Status.DONE), fmt) == "[green]✔[/] task"
+
 
 def test_format_label_unknown_status_falls_back():
     assert format_label(Node("i", "task", Status.TODO), {}) == "[white]?[/] task"
@@ -764,9 +893,11 @@ from rich.markup import escape
 from textual.widgets import Tree
 from maeh.core.models import Node, PlanTree
 
+
 def format_label(node: Node, status_format: dict[str, tuple[str, str]]) -> str:
     icon, color = status_format.get(node.status.value, ("?", "white"))
     return f"[{color}]{icon}[/] {escape(node.name)}"
+
 
 class PlanTreeWidget(Tree):
     def __init__(self, tree: PlanTree, status_format: dict[str, tuple[str, str]]):
@@ -780,8 +911,11 @@ class PlanTreeWidget(Tree):
 
     def _add(self, parent, node: Node) -> None:
         for child in node.children:
-            branch = parent.add(format_label(child, self._fmt), data=child,
-                                allow_expand=bool(child.children))
+            branch = parent.add(
+                format_label(child, self._fmt),
+                data=child,
+                allow_expand=bool(child.children),
+            )
             branch.expand()
             self._add(branch, child)
 ```
@@ -808,12 +942,14 @@ from maeh.core.models import Node, PlanTree
 from maeh.core.config import Config
 from maeh.cli.app import PlanApp
 
+
 @pytest.mark.asyncio
 async def test_app_mounts_tree(tmp_path):
     app = PlanApp(PlanTree(Node("r", "root")), Config(maeh_home=tmp_path))
     async with app.run_test() as pilot:
         await pilot.pause()
         from maeh.cli.widgets.plan_tree import PlanTreeWidget
+
         assert app.query_one(PlanTreeWidget) is not None
 ```
 
@@ -830,6 +966,7 @@ from maeh.core.config import Config
 from maeh.core.models import PlanTree
 from maeh.core.workspace import open_workspace
 from maeh.cli.widgets.plan_tree import PlanTreeWidget
+
 
 class PlanApp(App):
     BINDINGS = [("q", "quit", "quit")]
@@ -858,10 +995,12 @@ from __future__ import annotations
 import json
 from enum import Enum
 
+
 class OutputFormat(str, Enum):
     json = "json"
     yaml = "yaml"
     plaintext = "plaintext"
+
 
 def _flatten(data, prefix: str = "") -> list[str]:
     out: list[str] = []
@@ -875,11 +1014,13 @@ def _flatten(data, prefix: str = "") -> list[str]:
         out.append(f"{prefix.rstrip('.')} = {data}")
     return out
 
+
 def render(data, fmt: OutputFormat) -> str:
     if fmt is OutputFormat.json:
         return json.dumps(data, ensure_ascii=False, indent=2)
     if fmt is OutputFormat.yaml:
         import yaml
+
         return yaml.safe_dump(data, allow_unicode=True, sort_keys=False).rstrip()
     return "\n".join(_flatten(data))
 ```
@@ -897,16 +1038,22 @@ from maeh.cli.render import OutputFormat, render
 app = typer.Typer(help="maeh — a maestro that orchestrates agents.")
 _STATE: dict = {"overrides": [], "output": OutputFormat.plaintext}
 
+
 @app.callback()
 def main(
     set_: list[str] = typer.Option(
-        [], "--set", metavar="path.key=value",
-        help="override a config value (repeatable, Helm-style)"),
+        [],
+        "--set",
+        metavar="path.key=value",
+        help="override a config value (repeatable, Helm-style)",
+    ),
     output: OutputFormat = typer.Option(
-        OutputFormat.plaintext, "-o", "--output", help="output format for read commands"),
+        OutputFormat.plaintext, "-o", "--output", help="output format for read commands"
+    ),
 ) -> None:
     _STATE["overrides"] = set_
     _STATE["output"] = output
+
 
 @app.command()
 def show(plan_id: str) -> None:
@@ -914,17 +1061,21 @@ def show(plan_id: str) -> None:
     config = load_config(overrides=_STATE["overrides"])
     PlanApp(load_plan(plan_id, config.maeh_home), config).run()
 
+
 @app.command()
 def config() -> None:
     """Print the effective config (respects --set and -o)."""
     cfg = load_config(overrides=_STATE["overrides"])
     typer.echo(render(config_to_dict(cfg), _STATE["output"]))
 
+
 @app.command()
 def get(plan_id: str) -> None:
     """Print a plan tree as data — pipe into jq/yq with -o json|yaml."""
     cfg = load_config(overrides=_STATE["overrides"])
-    typer.echo(render(plan_to_dict(load_plan(plan_id, cfg.maeh_home)), _STATE["output"]))
+    typer.echo(
+        render(plan_to_dict(load_plan(plan_id, cfg.maeh_home)), _STATE["output"])
+    )
 ```
 
 - [ ] **Step 3b: Render test**
@@ -933,11 +1084,14 @@ def get(plan_id: str) -> None:
 # tests/cli/test_render.py
 from maeh.cli.render import OutputFormat, render
 
-def test_json(): 
+
+def test_json():
     assert render({"a": 1}, OutputFormat.json) == '{\n  "a": 1\n}'
+
 
 def test_plaintext_flattens():
     assert render({"a": {"b": 1}}, OutputFormat.plaintext) == "a.b = 1"
+
 
 def test_yaml():
     assert render({"a": 1}, OutputFormat.yaml) == "a: 1"
@@ -966,6 +1120,7 @@ import ast, pathlib
 
 CORE = pathlib.Path("src/maeh/core")
 
+
 def _imports(path):
     tree = ast.parse(path.read_text())
     for node in ast.walk(tree):
@@ -974,6 +1129,7 @@ def _imports(path):
         if isinstance(node, ast.Import):
             for n in node.names:
                 yield n.name
+
 
 def test_core_never_imports_cli_or_textual():
     offenders = []
@@ -1024,7 +1180,7 @@ version: 0.1.0
 ## Self-Review
 
 - **Spec coverage:** SPEC §4 workflow → skills (Task 10); §5 plan tree → Tasks 1-2; §6 components → config/store/telemetry (Tasks 3,4,6); §7 core/cli rule → Task 9; §8 layout → File Structure; §9 skills → Task 10. Gate interactivity (SPEC open Q2) and token-budget metric (Q1) are **not** built here — they remain open questions, not silently implemented.
-- **Type consistency:** `Status` values, `Node(id, name, status, path, children)` (constructors pass `children=` by keyword since `path` precedes it), `PlanTree`/`WorkspaceHandle`, `open_workspace(node, cwd, runner=_run)`, `require_safe_segment`, `format_label(node, status_format)`, `fsutil.private_subdir/write_private/append_private`, `store.save_plan/load_plan/update_plan/plan_to_dict`, `config.load_config(home, overrides)`/`config_to_dict`, `telemetry.log(..., ts, level, event)`/`emit_metric(..., ts)`, and `render.render(data, fmt)` are used identically across tasks.
+- **Type consistency:** `Status` values, `Node(id, name, status, path, children)` (constructors pass `children=` by keyword since `path` precedes it), `PlanTree`/`WorkspaceHandle`, `open_workspace(node, cwd, backend="tmux", runner=_run)` + `SUPPORTED_BACKENDS`, `require_safe_segment`, `format_label(node, status_format)`, `fsutil.private_subdir/write_private/append_private`, `store.save_plan/load_plan/update_plan/plan_to_dict`, `config.load_config(home, overrides)`/`config_to_dict`, `telemetry.log(..., ts, level, event)`/`emit_metric(..., ts)`, and `render.render(data, fmt)` are used identically across tasks.
 - **Placeholders:** none — every code/test step carries runnable content. Skill bodies (Task 10) are described by required sections rather than final prose, since content depends on per-skill domain drafting.
 
 ## Execution Handoff

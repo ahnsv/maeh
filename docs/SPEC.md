@@ -48,7 +48,7 @@ flowchart TD
 ## 5. Key terms
 
 - **Plan tree** — a tree whose nodes are executable actions; the shared progress artifact. Every node has a stable id (reused for logging and as its workspace handle).
-- **Workspace** — a development environment that varies by backend. Supported backend: `tmux`. `herdr` is planned — stub only in v1 (see §10 Q4). Consists of editor, primary, and critic.
+- **Workspace** — a development environment that varies by backend. Supported backends: `tmux` and `herdr` (the latter via its socket-API CLI). Consists of editor, primary, and critic.
 - **Editor** — the text editor opened in the workspace for the human (configured by `[agents].editor_cmd`, default `nvim`).
 - **Primary** — the agent instance that does the work; confers with the critic and runs subagents to parallelize (test, cosmetics, documentation, …).
 - **Critic** — the agent instance that critiques the primary's work; confers with the primary to keep guardrails and ensure increment quality.
@@ -89,7 +89,7 @@ maeh/
     plan.py         # build/traverse/mutate the plan tree
     config.py       # load + resolve $MAEH_HOME/config.toml
     store.py        # load/save plan-tree state under $MAEH_HOME
-    workspace.py    # open_workspace() — tmux (herdr added later behind a protocol)
+    workspace.py    # open_workspace() — tmux + herdr, plain dict dispatch
     telemetry.py    # structured logs + jsonl metrics writer
   cli/      # presentation only. Imports core; core never imports cli.
     main.py         # entrypoint (typer): subcommands delegate to core services
@@ -159,6 +159,4 @@ add-ons.
    (§2, §7); the initial figure is aspirational until pinned.
 2. How the gate one-pager achieves interactivity + inline comments in a TUI (TUI pane? exported HTML? PR-backed?).
 3. Memory layer contract — schema and lookup API.
-4. `herdr` backend interface details. Adding it introduces a `WorkspaceBackend`
-   protocol + dispatch; until then `open_workspace` is tmux-only.
-5. Retention/erasure policy for `$MAEH_HOME` logs, metrics, plans, and notes.
+4. Retention/erasure policy for `$MAEH_HOME` logs, metrics, plans, and notes.

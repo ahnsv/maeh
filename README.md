@@ -35,7 +35,7 @@ flowchart TD
 
 Key terms:
 
-- **Workspace**: a development environment that can vary by backend. Supported backend: tmux; herdr is planned (stub only for now). Made up of an editor, a primary, and a critic.
+- **Workspace**: a development environment that can vary by backend. Supported backends: tmux and herdr. Made up of an editor, a primary, and a critic.
 - **Editor**: the text editor opened in the workspace for the human (`[agents].editor_cmd`).
 - **Primary**: an agent instance that does the work. Confers with the critic on its execution, and runs multiple subagents to parallelize tasks — test, cosmetics, documentation, etc.
 - **Critic**: an agent instance that critiques the primary's work. Confers with the primary to keep the guardrails and ensure quality of increments.

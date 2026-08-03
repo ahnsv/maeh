@@ -3,8 +3,8 @@
 # Every key below is optional; omitted keys fall back to the defaults shown.
 
 [core]
-# Workspace backend. Only "tmux" is implemented in v1; any other value is
-# rejected at load with a clear error. "herdr" is planned (see SPEC §10 Q4).
+# Workspace backend: "tmux" or "herdr". Any other value is rejected at load
+# with a clear error. herdr uses its socket-API CLI (`herdr workspace …`).
 backend = "tmux"
 
 [agents]
