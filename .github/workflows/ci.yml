@@ -5,17 +5,28 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v5
         with:
-          components: rustfmt, clippy, llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: cargo test --all-targets --all-features
-      - run: cargo install cargo-llvm-cov --locked
-      - run: cargo llvm-cov --all-targets --all-features --fail-under-lines 100 --fail-under-functions 100
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      # Swap to `--frozen` once uv.lock is committed (reproducible installs).
+      - run: uv sync --all-extras
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest --cov=maeh --cov-report=term-missing --cov-fail-under=90

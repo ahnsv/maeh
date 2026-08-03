@@ -35,7 +35,8 @@ flowchart TD
 
 Key terms:
 
-- **Workspace**: a development environment that can vary by backend. Supported backends: herdr, tmux (for now).
+- **Workspace**: a development environment that can vary by backend. Supported backend: tmux; herdr is planned (stub only for now). Made up of an editor, a primary, and a critic.
+- **Editor**: the text editor opened in the workspace for the human (`[agents].editor_cmd`).
 - **Primary**: an agent instance that does the work. Confers with the critic on its execution, and runs multiple subagents to parallelize tasks — test, cosmetics, documentation, etc.
 - **Critic**: an agent instance that critiques the primary's work. Confers with the primary to keep the guardrails and ensure quality of increments.
 
@@ -45,7 +46,7 @@ Following components are to achieve self-improvement of workflow:
 - Agents: `~/.maeh/agents/<agent-name>/AGENT.md` serves as a centralized agent instruction location.
 - Memory: an external memory layer defined by harness setting. If this is configured, you can look up memory
 - Logs (read-only): every CLI invocation is logged in `~/.maeh/logs/<YYYY-MM-DD.log>`. logging config logs plan ID and node ID to pair them
-- Metrics (read-only): CLI telemetry logs metrics in JSON to `~/.maeh/metrics/<metric-name>/<YYYY-MM-DD.jsonl>`. This metrics are aggregated using duckdb.
+- Metrics (read-only): CLI telemetry logs metrics in JSON to `~/.maeh/metrics/<metric-name>/<YYYY-MM-DD.jsonl>`. This metrics are aggregated with stdlib `json`.
 - Retro handoff (read-only): each workflow run emits a short retro handoff note in markdown.
 - Past improvement note: a one-paragraph note about past improvement. `~/.maeh/improvements/<YYYY-MM-DD.md>`
 

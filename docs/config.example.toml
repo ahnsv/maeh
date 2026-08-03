@@ -1,0 +1,29 @@
+# Sample <MAEH_HOME>/config.toml — run `maeh config path` to find the active file.
+# Home resolution (highest first):  --home <path>  >  $MAEH_HOME  >  ~/.maeh
+# Every key below is optional; omitted keys fall back to the defaults shown.
+
+[core]
+# Workspace backend. Only "tmux" is implemented in v1; any other value is
+# rejected at load with a clear error. "herdr" is planned (see SPEC §10 Q4).
+backend = "tmux"
+
+[agents]
+# Commands launched inside a workspace.
+primary_cmd = "claude"   # the agent that does the work
+critic_cmd  = "claude"   # the agent that critiques the primary's work
+editor_cmd  = "nvim"     # the editor opened alongside the agents
+
+[tui.status_format]
+# icon + color per plan-tree node status — this is the customizable TUI format.
+# color is any Rich color name.
+done    = ["✔", "green"]
+running = ["◐", "yellow"]
+todo    = ["○", "grey50"]
+failed  = ["✗", "red"]
+
+[review]
+# Extra guardrail files applied on top of each repo's own guidelines.
+guardrails = []          # e.g. ["~/.maeh/guardrails/security.md"]
+
+[limits]
+max_concurrent_workspaces = 3
