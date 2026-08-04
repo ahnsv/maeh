@@ -40,6 +40,35 @@ def test_open_requires_existing_path(tmp_path):
         open_workspace(Node("n1", "x"), _cfg(tmp_path, "tmux"))  # node.path is None
 
 
+def test_capsule_substituted_into_pane_command(tmp_path):
+    repo = _repo(tmp_path)
+    cap = tmp_path / "cap.md"
+    cap.write_text("hi")
+    calls: list[list[str]] = []
+    cfg = _cfg(tmp_path, "tmux")
+    cfg.agents.primary_cmd = "pi {capsule}"
+    cfg.workspace.panes["default"] = ["primary"]
+
+    def fake(cmd):
+        calls.append(cmd)
+        return "" if cmd[:2] != ["tmux", "list-windows"] else ""
+
+    open_workspace(
+        Node("n1", "t", path=str(repo)), cfg, {"primary": str(cap)}, runner=fake
+    )
+    sent = [c for c in calls if c[:2] == ["tmux", "send-keys"] and "-l" in c]
+    assert sent and sent[0][-1] == f"pi {cap}"  # {capsule} -> quoted path
+
+
+def test_open_refuses_blank_capsule(tmp_path):
+    repo = _repo(tmp_path)
+    cfg = _cfg(tmp_path, "tmux")
+    cfg.agents.primary_cmd = "pi {capsule}"
+    cfg.workspace.panes["default"] = ["primary"]
+    with pytest.raises((ValueError, RuntimeError)):  # {capsule} but no path prepared
+        open_workspace(Node("n1", "t", path=str(repo)), cfg, {}, runner=lambda c: "")
+
+
 def test_tmux_creates_worktree_window_and_panes(tmp_path):
     repo = _repo(tmp_path)
     calls: list[list[str]] = []

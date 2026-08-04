@@ -63,12 +63,25 @@ def test_list_unknown_filter_key_errors(tmp_path):
     assert r.exit_code != 0
 
 
+def test_plan_add_brief_and_capsule_command(tmp_path):
+    _run(tmp_path, "plan", "create", "wf", "Goal")
+    _run(tmp_path, "plan", "add", "wf", "n1", "Do X", "--brief", "acceptance: Y")
+    assert (
+        '"brief": "acceptance: Y"' in _run(tmp_path, "-o", "json", "get", "wf").stdout
+    )
+    cap = _run(tmp_path, "capsule", "wf", "n1", "--role", "critic")
+    assert cap.exit_code == 0
+    assert "acceptance: Y" in cap.stdout and "pass/fail verdict" in cap.stdout
+
+
 def test_open_command_stubbed(tmp_path, monkeypatch):
     from maeh.core.workspace import WorkspaceHandle
 
     monkeypatch.setattr(
         "maeh.cli.main.open_workspace",
-        lambda node, cfg: WorkspaceHandle(node.id, "tmux", "maeh-n1", "/wt/maeh-n1"),
+        lambda node, cfg, capsules: WorkspaceHandle(
+            node.id, "tmux", "maeh-n1", "/wt/maeh-n1"
+        ),
     )
     _run(tmp_path, "plan", "create", "wf", "x")
     _run(tmp_path, "plan", "add", "wf", "n1", "First", "--path", str(tmp_path))

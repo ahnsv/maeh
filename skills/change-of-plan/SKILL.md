@@ -32,6 +32,14 @@ Stage 2 (Plan) or Stage 3 (Execute) of the maeh workflow.
 
 An updated, saved plan tree with nodes routed back to Plan or Execute.
 
+## Guardrails (capsules)
+
+- A node's capsule is rendered from its frozen `brief` at `maeh open` time. If you
+  change a `brief`, the file re-renders on the next `open`, but a **workspace that
+  is already open keeps the stale capsule** (idempotent reuse doesn't re-seed the
+  pane). To deliver a changed brief to a running node, tear its workspace down
+  (`herdr worktree remove --workspace <id>` / close the tmux window) and re-`open`.
+
 ## Guardrails
 
 - Change the smallest thing that addresses the root cause — do not rewrite the

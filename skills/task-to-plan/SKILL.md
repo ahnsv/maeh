@@ -24,11 +24,13 @@ workspaces or execution exist.
    success criteria, out-of-scope. Ask a few questions at a time, not a wall.
 3. **Explore the repo.** Locate the files, patterns, and tests the work touches.
    Ground every planned node in a real code location.
-4. **Compose the plan tree.** Each node is the smallest independently reviewable
-   action. Give each a stable id (reused later for logging and as its workspace
-   handle). Order nodes as a sequence of work both agents and humans can track.
-5. **Persist.** Build a `maeh.core.models.PlanTree` and save it with
-   `maeh.core.store.save_plan(tree, home)`.
+4. **Compose the plan tree via the CLI.** `maeh plan create <plan_id> <name>`, then
+   `maeh plan add <plan_id> <node_id> <name> --path <repo> --brief "<scope + acceptance>"`
+   per node. Each node is the smallest independently reviewable action with a stable id.
+5. **Freeze the brief.** This interview/exploration is the *only* place the fuzzy
+   task detail is distilled — it is stored on the node as `--brief` and frozen.
+   Execute-time capsules are a pure, deterministic render of that brief (via
+   `maeh capsule …`); never re-cook the capsule at open time.
 
 ## Output
 

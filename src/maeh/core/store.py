@@ -17,6 +17,7 @@ def _to_dict(node: Node) -> dict:
         "name": node.name,
         "status": node.status.value,
         "path": node.path,
+        "brief": node.brief,
         "children": [_to_dict(c) for c in node.children],
     }
 
@@ -27,6 +28,7 @@ def _from_dict(d: dict) -> Node:
         name=d["name"],
         status=Status(d["status"]),
         path=d.get("path"),
+        brief=d.get("brief"),
         children=[_from_dict(c) for c in d["children"]],
     )
 
@@ -106,4 +108,15 @@ def save_handle(home: Path, handle: dict) -> Path:
     d = private_subdir(home, "workspaces")
     path = d / f"{handle['node_id']}.json"
     write_private(path, json.dumps(handle, ensure_ascii=False, indent=2))
+    return path
+
+
+def write_capsule(home: Path, plan_id: str, node_id: str, role: str, text: str) -> Path:
+    """Write a rendered role capsule to a private file under $MAEH_HOME (never the
+    repo), so `{capsule}` can point an agent command at it. Ids/role validated."""
+    for seg in (plan_id, node_id, role):
+        require_safe_segment(seg)
+    d = private_subdir(home, "capsules", plan_id)
+    path = d / f"{node_id}-{role}.md"
+    write_private(path, text)
     return path

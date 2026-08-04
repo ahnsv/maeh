@@ -29,6 +29,7 @@ class Node:
     name: str
     status: Status = Status.TODO
     path: str | None = None  # code location the node's workspace opens in
+    brief: str | None = None  # frozen plan-time task detail; rendered into capsules
     children: list[Node] = field(default_factory=list)
 
     def __post_init__(self) -> None:

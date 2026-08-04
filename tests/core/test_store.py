@@ -72,3 +72,15 @@ def test_save_handle_is_private(tmp_path):
         {"node_id": "n1", "backend": "tmux", "ref": "maeh-n1", "worktree": "/wt"},
     )
     assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+
+def test_write_capsule_private_and_validates_role(tmp_path):
+    import stat
+
+    from maeh.core.store import write_capsule
+
+    p = write_capsule(tmp_path, "plan1", "n1", "primary", "hello")
+    assert p.read_text() == "hello"
+    assert stat.S_IMODE(p.stat().st_mode) == 0o600
+    with pytest.raises(ValueError):
+        write_capsule(tmp_path, "plan1", "n1", "../evil", "x")  # role path-injection

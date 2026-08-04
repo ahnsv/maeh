@@ -6,6 +6,7 @@ import typer
 
 from maeh.cli.app import PlanApp
 from maeh.cli.render import OutputFormat, render
+from maeh.core import capsule as capsule_mod
 from maeh.core.config import DEFAULT_CONFIG_TOML, config_to_dict, load_config
 from maeh.core.models import Node, PlanTree, Status
 from maeh.core.plan import add_child, set_status
@@ -114,15 +115,38 @@ def plan_add(
     path: str = typer.Option(
         None, "--path", help="code location for the node's workspace"
     ),
+    brief: str = typer.Option(
+        None, "--brief", help="frozen plan-time task detail (rendered into capsules)"
+    ),
 ) -> None:
     """Add a node to a plan tree."""
     cfg = _config()
     update_plan(
         cfg.maeh_home,
         plan_id,
-        lambda t: add_child(t, parent or t.root.id, Node(node_id, name, path=path)),
+        lambda t: add_child(
+            t, parent or t.root.id, Node(node_id, name, path=path, brief=brief)
+        ),
     )
     typer.echo(f"added {node_id}")
+
+
+@app.command()
+def capsule(
+    plan_id: str,
+    node_id: str,
+    role: str = typer.Option("primary", "--role", help="primary|critic|editor"),
+) -> None:
+    """Print the deterministic task capsule for a node+role (respects -o)."""
+    cfg = _config()
+    tree = load_plan(plan_id, cfg.maeh_home)
+    text = capsule_mod.capsule(tree, node_id, role, cfg.review.guardrails)
+    if _STATE["output"] is OutputFormat.plaintext:
+        typer.echo(text, nl=False)
+    else:
+        typer.echo(
+            render({"role": role, "node_id": node_id, "text": text}, _STATE["output"])
+        )
 
 
 @plan_app.command("set-status")
@@ -138,10 +162,13 @@ def plan_set_status(plan_id: str, node_id: str, status: str) -> None:
 def open_cmd(plan_id: str, node_id: str) -> None:
     """Execute: open the node's worktree-backed workspace and set it RUNNING."""
     cfg = _config()
-    node = load_plan(plan_id, cfg.maeh_home).find(node_id)
+    tree = load_plan(plan_id, cfg.maeh_home)
+    node = tree.find(node_id)
     if node is None:
         raise typer.BadParameter(f"node {node_id!r} not in {plan_id!r}")
-    handle = open_workspace(node, cfg)
+    # Render + write each role's capsule (fresh from the frozen brief), then open.
+    capsules = capsule_mod.prepare(tree, node_id, cfg, cfg.maeh_home)
+    handle = open_workspace(node, cfg, capsules)
     update_plan(
         cfg.maeh_home, plan_id, lambda t: set_status(t, node_id, Status.RUNNING)
     )
