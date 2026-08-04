@@ -54,3 +54,37 @@ def test_config_to_dict_roundtrips_shape(tmp_path):
     d = config_to_dict(load_config(tmp_path))
     assert d["core"]["backend"] == "tmux"
     assert d["tui"]["status_format"]["done"] == ["✔", "green"]
+
+
+def test_worktree_and_workspace_defaults(tmp_path):
+    cfg = load_config(tmp_path)
+    assert cfg.worktree.prefix == "maeh"
+    assert cfg.worktree.location == "~/.maeh/worktrees"
+    assert cfg.workspace.panes_for("tmux") == ["editor", "primary", "critic"]
+
+
+def test_per_backend_panes_override(tmp_path):
+    (tmp_path / "config.toml").write_text(
+        '[worktree]\nlocation = ".worktrees"\n'
+        '[workspace]\npanes = ["primary"]\n'
+        '[workspace.herdr]\npanes = ["primary", "critic"]\n'
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.worktree.location == ".worktrees"
+    assert cfg.workspace.panes_for("tmux") == ["primary"]  # default
+    assert cfg.workspace.panes_for("herdr") == ["primary", "critic"]  # override
+
+
+def test_unsafe_worktree_prefix_rejected(tmp_path):
+    (tmp_path / "config.toml").write_text('[worktree]\nprefix = "../evil"\n')
+    with pytest.raises(ValueError):
+        load_config(tmp_path)
+
+
+def test_default_config_template_loads(tmp_path):
+    from maeh.core.config import DEFAULT_CONFIG_TOML
+
+    (tmp_path / "config.toml").write_text(DEFAULT_CONFIG_TOML)
+    cfg = load_config(tmp_path)  # the shipped default must be valid + loadable
+    assert cfg.backend == "tmux"
+    assert cfg.workspace.panes_for("tmux") == ["editor", "primary", "critic"]

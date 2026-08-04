@@ -1,29 +1,36 @@
 # Sample <MAEH_HOME>/config.toml — run `maeh config path` to find the active file.
+# Scaffold a fresh one with:  maeh default-config > ~/.maeh/config.toml
 # Home resolution (highest first):  --home <path>  >  $MAEH_HOME  >  ~/.maeh
 # Every key below is optional; omitted keys fall back to the defaults shown.
 
 [core]
-# Workspace backend: "tmux" or "herdr". Any other value is rejected at load
-# with a clear error. herdr uses its socket-API CLI (`herdr workspace …`).
+# Workspace backend: "tmux" or "herdr". Any other value is rejected at load.
 backend = "tmux"
 
 [agents]
-# Commands launched inside a workspace.
+# Command run in each pane by role (see [workspace].panes).
 primary_cmd = "claude"   # the agent that does the work
 critic_cmd  = "claude"   # the agent that critiques the primary's work
 editor_cmd  = "nvim"     # the editor opened alongside the agents
 
+[worktree]
+# Each executable node runs in its own git worktree.
+prefix   = "maeh"                 # branch + directory prefix -> maeh-<node-id>
+location = "~/.maeh/worktrees"    # central. Use ".worktrees" for project-local.
+
+[workspace]
+# Roles opened as panes, in order. Override per backend with [workspace.<backend>].
+panes = ["editor", "primary", "critic"]
+
 [tui.status_format]
-# icon + color per plan-tree node status — this is the customizable TUI format.
-# color is any Rich color name.
+# icon + color per plan-tree node status (any Rich color name).
 done    = ["✔", "green"]
 running = ["◐", "yellow"]
 todo    = ["○", "grey50"]
 failed  = ["✗", "red"]
 
 [review]
-# Extra guardrail files applied on top of each repo's own guidelines.
-guardrails = []          # e.g. ["~/.maeh/guardrails/security.md"]
+guardrails = []          # extra guardrail files on top of each repo's guidelines
 
 [limits]
 max_concurrent_workspaces = 3

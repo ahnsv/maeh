@@ -71,3 +71,39 @@ def update_plan(
         mutate(tree)
         save_plan(tree, home)
         return tree
+
+
+# Fixed attribute schema for `maeh list` rows / --filter (independent of contents).
+LIST_KEYS = ("id", "status", "todo", "running", "done", "failed")
+
+
+def _plan_row(tree: PlanTree) -> dict:
+    nodes = list(tree.walk())
+    row = {"id": tree.root.id, "status": tree.root.status.value}
+    for st in (Status.TODO, Status.RUNNING, Status.DONE, Status.FAILED):
+        row[st.value] = sum(1 for n in nodes if n.status is st)
+    return row
+
+
+def list_plans(home: Path) -> list[dict]:
+    plans = home / "plans"
+    if not plans.is_dir():
+        return []
+    return [_plan_row(load_plan(p.stem, home)) for p in sorted(plans.glob("*.json"))]
+
+
+def filter_plans(rows: list[dict], filters: dict[str, str]) -> list[dict]:
+    for key in filters:
+        if key not in LIST_KEYS:
+            raise KeyError(f"unknown filter key {key!r}; valid: {', '.join(LIST_KEYS)}")
+    return [r for r in rows if all(str(r[k]) == v for k, v in filters.items())]
+
+
+def save_handle(home: Path, handle: dict) -> Path:
+    """Record an opened workspace (node_id, backend, ref, worktree) so worktrees
+    are recoverable — a future gc/reconcile reads these instead of scanning."""
+    require_safe_segment(handle["node_id"])
+    d = private_subdir(home, "workspaces")
+    path = d / f"{handle['node_id']}.json"
+    write_private(path, json.dumps(handle, ensure_ascii=False, indent=2))
+    return path

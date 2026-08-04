@@ -48,7 +48,7 @@ flowchart TD
 ## 5. Key terms
 
 - **Plan tree** — a tree whose nodes are executable actions; the shared progress artifact. Every node has a stable id (reused for logging and as its workspace handle).
-- **Workspace** — a development environment that varies by backend. Supported backends: `tmux` and `herdr` (the latter via its socket-API CLI). Consists of editor, primary, and critic.
+- **Workspace** — a development environment that varies by backend. Supported backends: `tmux` and `herdr` (the latter via its socket-API CLI). Realized as a git worktree (`[worktree]` config) hosting one pane per role — editor, primary, critic — each running its `[agents]` command (`[workspace].panes`, overridable per backend). See `docs/ADDENDUM-01.md`.
 - **Editor** — the text editor opened in the workspace for the human (configured by `[agents].editor_cmd`, default `nvim`).
 - **Primary** — the agent instance that does the work; confers with the critic and runs subagents to parallelize (test, cosmetics, documentation, …).
 - **Critic** — the agent instance that critiques the primary's work; confers with the primary to keep guardrails and ensure increment quality.
@@ -75,7 +75,7 @@ next improvement revisits the prior note to validate its claim.
 
 - **Language:** Python ≥ 3.11 (stdlib `tomllib`).
 - **TUI:** Textual. **CLI/TUI is a presentation layer only** — no business logic. All logic lives in `maeh.core`, which must not import `maeh.cli` or `textual`.
-- **CLI conventions:** a global repeatable `--set path.key=value` (Helm-style; coerced and applied inside `core.config`, not the CLI) overrides any config value on demand; `-o/--output {json,yaml,plaintext}` on read commands (`config`, `get`) makes output pipeable into `jq`/`yq`.
+- **CLI conventions:** a global repeatable `--set path.key=value` (Helm-style; coerced and applied inside `core.config`, not the CLI) overrides any config value on demand; `-o/--output {json,yaml,plaintext}` on read commands (`config`, `get`, `list`) makes output pipeable into `jq`/`yq`. The workflow is fully CLI-drivable: `plan create/add/set-status`, `open` (Execute), `list [--filter k=v]`, `default-config`, `get`, `show` — see `docs/ADDENDUM-01.md`.
 - **Skills:** plain markdown (`SKILL.md` + optional `references/`), harness-agnostic.
 - **Token budget (G1):** a per-run output-token target recorded in metrics; the initial aspirational figure and its exact definition are TBD and must be pinned before G1 is claimed met.
 - **Persistence:** plan-tree state and all component files live under `$MAEH_HOME`; no external DB and no extra deps in v1 — metrics are jsonl aggregated with stdlib `json` (revisit DuckDB only if metric volume warrants it).

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from textual.app import App, ComposeResult
 from textual.widgets import Footer, Header, Tree
 
@@ -27,6 +25,5 @@ class PlanApp(App):
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         node = event.node.data
         if node is not None:
-            cwd = Path(node.path) if node.path else Path.cwd()
-            handle = open_workspace(node, cwd, self._config.backend)
+            handle = open_workspace(node, self._config)
             self.notify(f"workspace {handle.ref}", title=node.name)
