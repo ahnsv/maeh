@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 import subprocess
@@ -63,16 +64,23 @@ def _seed(role: str, cmd: str, capsule_paths: CapsulePaths | None) -> str:
     return cmd.replace("{capsule}", shlex.quote(path))
 
 
+def _repo_key(repo: Path) -> str:
+    """Basename + short hash of the resolved repo root — unique per repo so two
+    repos sharing a basename don't collide onto the same worktree dir."""
+    digest = hashlib.sha1(str(repo.resolve()).encode()).hexdigest()[:8]
+    return f"{repo.name}-{digest}"
+
+
 def resolve_worktree(
     prefix: str, location: str, repo: Path, node_id: str
 ) -> tuple[Path, str]:
     """Return (worktree_path, branch). Central when location is absolute/`~`
-    (`<location>/<repo>/<branch>`), else project-local under the repo — a relative
-    location is confined so it can't escape the repo. `prefix` is validated at
-    config load; `node_id` is validated on the node, so `branch` is path-safe."""
+    (`<location>/<repo>-<hash>/<branch>`), else project-local under the repo — a
+    relative location is confined so it can't escape the repo. `prefix` is validated
+    at config load; `node_id` is validated on the node, so `branch` is path-safe."""
     branch = f"{prefix}-{node_id}"
     if location.startswith("~") or Path(location).is_absolute():
-        base = Path(location).expanduser() / repo.name
+        base = Path(location).expanduser() / _repo_key(repo)
     else:
         base = (repo / location).resolve()
         if not base.is_relative_to(repo.resolve()):
@@ -129,30 +137,43 @@ def _open_herdr(
 ) -> WorkspaceHandle:
     label = _label(node)
     workspaces = json.loads(run(["herdr", "workspace", "list"]))["result"]["workspaces"]
-    for ws in workspaces:  # find-or-create by label — idempotent, no re-split
+    for ws in workspaces:  # 1. workspace already open → reuse (no re-split)
         if ws.get("label") == label:
             wt = (ws.get("worktree") or {}).get("checkout_path", "")
             return WorkspaceHandle(node.id, "herdr", ws["workspace_id"], wt)
     repo = Path(node.path).expanduser()
-    branch = f"{config.worktree.prefix}-{node.id}"
-    created = json.loads(
-        run(
-            [
-                "herdr",
-                "worktree",
-                "create",
-                "--cwd",
-                str(repo),
-                "--branch",
-                branch,
-                "--label",
-                label,
-            ]
-        )
-    )["result"]
-    ws_id = created["workspace"]["workspace_id"]
-    wt = (created["workspace"].get("worktree") or {}).get("checkout_path", "")
-    pane = created["root_pane"]["pane_id"]
+    wt_path, branch = resolve_worktree(
+        config.worktree.prefix, config.worktree.location, repo, node.id
+    )
+    # Detect an existing checkout on disk (herdr `worktree list` doesn't track
+    # custom `--path` worktrees) — keyed on the disambiguated path, not branch.
+    if wt_path.exists():
+        # 2. checkout exists but no open workspace → reattach (P0-#3)
+        result = json.loads(
+            run(["herdr", "worktree", "open", "--path", str(wt_path), "--label", label])
+        )["result"]
+    else:
+        # 3. nothing yet → create at the disambiguated path (P0-#2)
+        result = json.loads(
+            run(
+                [
+                    "herdr",
+                    "worktree",
+                    "create",
+                    "--cwd",
+                    str(repo),
+                    "--branch",
+                    branch,
+                    "--label",
+                    label,
+                    "--path",
+                    str(wt_path),
+                ]
+            )
+        )["result"]
+    ws_id = result["workspace"]["workspace_id"]
+    wt = (result["workspace"].get("worktree") or {}).get("checkout_path", "")
+    pane = result["root_pane"]["pane_id"]
     for i, (role, cmd) in enumerate(_role_cmds(config)):
         if i > 0:
             # herdr: pane id is positional; direction is right|down.
