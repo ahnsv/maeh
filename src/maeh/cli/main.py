@@ -6,6 +6,7 @@ import typer
 
 from maeh.cli.app import PlanApp
 from maeh.cli.render import OutputFormat, render
+from maeh.core import bootstrap, guardrails
 from maeh.core import capsule as capsule_mod
 from maeh.core.config import (
     DEFAULT_CONFIG_TOML,
@@ -79,6 +80,20 @@ def init(
     """Scaffold $MAEH_HOME with config, default guardrail, and orchestrator AGENT.md."""
     for path, status in init_home(resolve_home(), force=force).items():
         typer.echo(f"{status}: {path}")
+
+
+@app.command()
+def orchestrator() -> None:
+    """Print the harness-agnostic orchestrator bootstrap prompt.
+
+    AGENT.md + inlined guardrails + runtime facts. Feed it to any harness:
+    `<harness> "$(maeh orchestrator)"` or `> AGENTS.md`.
+    """
+    cfg = _config()
+    try:
+        typer.echo(bootstrap.orchestrator_prompt(cfg, cfg.maeh_home), nl=False)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from None
 
 
 @app.command("default-config")
@@ -159,7 +174,11 @@ def capsule(
     """Print the deterministic task capsule for a node+role (respects -o)."""
     cfg = _config()
     tree = load_plan(plan_id, cfg.maeh_home)
-    text = capsule_mod.capsule(tree, node_id, role, cfg.review.guardrails)
+    try:
+        gpaths = guardrails.resolve(cfg, cfg.maeh_home)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from None
+    text = capsule_mod.capsule(tree, node_id, role, gpaths)
     if _STATE["output"] is OutputFormat.plaintext:
         typer.echo(text, nl=False)
     else:
@@ -186,7 +205,12 @@ def open_cmd(plan_id: str, node_id: str) -> None:
     if node is None:
         raise typer.BadParameter(f"node {node_id!r} not in {plan_id!r}")
     # Render + write each role's capsule (fresh from the frozen brief), then open.
-    capsules = capsule_mod.prepare(tree, node_id, cfg, cfg.maeh_home)
+    try:
+        if not guardrails.resolve(cfg, cfg.maeh_home):
+            typer.echo("warning: no guardrails active — agents run unguarded", err=True)
+        capsules = capsule_mod.prepare(tree, node_id, cfg, cfg.maeh_home)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from None
     handle = open_workspace(node, cfg, capsules)
     update_plan(
         cfg.maeh_home, plan_id, lambda t: set_status(t, node_id, Status.RUNNING)

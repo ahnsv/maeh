@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.resources
-import json
 from pathlib import Path
 
 from maeh.core.config import DEFAULT_CONFIG_TOML
@@ -42,16 +41,7 @@ def init_home(home: Path, *, force: bool = False) -> dict[str, str]:
 
     place(guard, _template("guardrails/default.md"))
     place(agent, _template("agents/orchestrator/AGENT.md"))
-
-    # Pre-wire the config's guardrail to the scaffolded file's absolute path so the
-    # capsule reference resolves for working agents.
-    if "guardrails = []" not in DEFAULT_CONFIG_TOML:
-        raise RuntimeError(
-            "DEFAULT_CONFIG_TOML changed; update init_home guardrail wiring"
-        )
-    # json.dumps gives a TOML-safe basic string (escapes " and \ in the path).
-    config_text = DEFAULT_CONFIG_TOML.replace(
-        "guardrails = []", f"guardrails = [{json.dumps(str(guard))}]", 1
-    )
-    place(home / "config.toml", config_text)
+    # No config pre-wire: guardrails/default.md is picked up by directory discovery
+    # (guardrails.resolve), which stays valid if $MAEH_HOME moves.
+    place(home / "config.toml", DEFAULT_CONFIG_TOML)
     return result
