@@ -1,34 +1,36 @@
-# Sample <home>/config.toml. Run `maeh config path` to find the active file.
-# The persisted default home lives in the user config as [paths].home; see docs/config.md.
+# Sample <MAEH_HOME>/config.toml — run `maeh config path` to find the active file.
+# Scaffold a fresh one with:  maeh default-config > ~/.maeh/config.toml
+# Home resolution (highest first):  --home <path>  >  $MAEH_HOME  >  ~/.maeh
+# Every key below is optional; omitted keys fall back to the defaults shown.
 
-[backend]
-# auto selects Herdr inside a Herdr session, otherwise tmux. Other values: herdr, tmux.
-kind = "auto"
-herdr_bin = "herdr"
-tmux_bin = "tmux"
-tmux_session = "maeh"
-
-[layout]
-include_editor = true
-focus = false
+[core]
+# Workspace backend: "tmux" or "herdr". Any other value is rejected at load.
+backend = "tmux"
 
 [agents]
-primary_cmd = "codex"
-critic_cmd = "codex"
-editor_cmd = "vi"
+# Command run in each pane by role (see [workspace].panes).
+primary_cmd = "claude"   # the agent that does the work
+critic_cmd  = "claude"   # the agent that critiques the primary's work
+editor_cmd  = "nvim"     # the editor opened alongside the agents
+
+[worktree]
+# Each executable node runs in its own git worktree.
+prefix   = "maeh"                 # branch + directory prefix -> maeh-<node-id>
+location = "~/.maeh/worktrees"    # central. Use ".worktrees" for project-local.
+
+[workspace]
+# Roles opened as panes, in order. Override per backend with [workspace.<backend>].
+panes = ["editor", "primary", "critic"]
+
+[tui.status_format]
+# icon + color per plan-tree node status (any Rich color name).
+done    = ["✔", "green"]
+running = ["◐", "yellow"]
+todo    = ["○", "grey50"]
+failed  = ["✗", "red"]
+
+[review]
+guardrails = []          # extra guardrail files on top of each repo's guidelines
 
 [limits]
-context_switch_cap = 3
-review_cap = 5
-
-[board_cache]
-intake_ttl_secs = 3600
-revamp_ttl_secs = 10800
-
-[task_capsules]
-max_chars = 1800
-
-[work_hours]
-start_hour = 9
-end_hour = 17
-workdays = [1, 2, 3, 4, 5]
+max_concurrent_workspaces = 3

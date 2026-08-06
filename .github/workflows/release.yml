@@ -2,47 +2,58 @@ name: release
 
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: maeh-linux-x86_64
-          - os: macos-latest
-            artifact: maeh-macos-arm64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-targets --all-features
-      - run: cargo build --release --locked
-      - run: |
-          mkdir dist
-          cp target/release/maeh dist/${{ matrix.artifact }}
-          shasum -a 256 dist/${{ matrix.artifact }} > dist/${{ matrix.artifact }}.sha256
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: dist/*
-
-  publish:
-    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - name: Verify tag matches pyproject version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(python3 -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          test "$tag" = "$pkg" || { echo "tag $tag != pyproject version $pkg"; exit 1; }
+      - run: uv sync --all-extras
+      - run: uv run pytest -q
+      - run: uv build            # sdist + wheel into dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  # PyPI Trusted Publishing (OIDC) — no API token. Configure a pending publisher
+  # on PyPI for this repo/workflow, and a `pypi` environment on the repo.
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
       - uses: actions/download-artifact@v4
         with:
+          name: dist
           path: dist
-          merge-multiple: true
-      - run: cp install.sh dist/install.sh
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
