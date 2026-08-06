@@ -63,6 +63,19 @@ def test_list_unknown_filter_key_errors(tmp_path):
     assert r.exit_code != 0
 
 
+def test_init_scaffolds_home(tmp_path):
+    r = _run(tmp_path, "init")
+    assert r.exit_code == 0
+    assert (tmp_path / "config.toml").exists()
+    assert (tmp_path / "guardrails" / "default.md").exists()
+    assert (tmp_path / "agents" / "orchestrator" / "AGENT.md").exists()
+    # guardrail wired into the effective config
+    cfg = _run(tmp_path, "-o", "json", "config").stdout
+    assert str(tmp_path / "guardrails" / "default.md") in cfg
+    # idempotent
+    assert "skipped" in _run(tmp_path, "init").stdout
+
+
 def test_plan_add_brief_and_capsule_command(tmp_path):
     _run(tmp_path, "plan", "create", "wf", "Goal")
     _run(tmp_path, "plan", "add", "wf", "n1", "Do X", "--brief", "acceptance: Y")

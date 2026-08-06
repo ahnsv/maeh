@@ -7,9 +7,15 @@ import typer
 from maeh.cli.app import PlanApp
 from maeh.cli.render import OutputFormat, render
 from maeh.core import capsule as capsule_mod
-from maeh.core.config import DEFAULT_CONFIG_TOML, config_to_dict, load_config
+from maeh.core.config import (
+    DEFAULT_CONFIG_TOML,
+    config_to_dict,
+    load_config,
+    resolve_home,
+)
 from maeh.core.models import Node, PlanTree, Status
 from maeh.core.plan import add_child, set_status
+from maeh.core.scaffold import init_home
 from maeh.core.store import (
     filter_plans,
     list_plans,
@@ -60,6 +66,19 @@ def show(plan_id: str) -> None:
 def config() -> None:
     """Print the effective config (respects --set and -o)."""
     typer.echo(render(config_to_dict(_config()), _STATE["output"]))
+
+
+@app.command()
+def init(
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="refresh bundled templates (backs up prior files to .bak)",
+    ),
+) -> None:
+    """Scaffold $MAEH_HOME with config, default guardrail, and orchestrator AGENT.md."""
+    for path, status in init_home(resolve_home(), force=force).items():
+        typer.echo(f"{status}: {path}")
 
 
 @app.command("default-config")

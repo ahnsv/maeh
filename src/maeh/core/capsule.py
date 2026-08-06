@@ -96,6 +96,14 @@ def capsule(tree: PlanTree, node_id: str, role: str, guardrails: list[str]) -> s
 def prepare(tree: PlanTree, node_id: str, config: Config, home: Path) -> dict[str, str]:
     """Render + write a capsule per role in the backend's pane set; return
     {role: absolute capsule path} for `{capsule}` substitution."""
+    # Fail closed: a configured guardrail that doesn't resolve would silently leave
+    # agents unguarded (e.g. $MAEH_HOME moved after `maeh init` wrote an absolute path).
+    for g in config.review.guardrails:
+        if not Path(g).expanduser().exists():
+            raise ValueError(
+                f"configured guardrail not found: {g} — agents would run unguarded; "
+                "fix [review].guardrails or run `maeh init`"
+            )
     paths: dict[str, str] = {}
     for role in config.workspace.panes_for(config.backend):
         text = capsule(tree, node_id, role, config.review.guardrails)

@@ -2,6 +2,17 @@
 
 a maestro that orchestrates mass of agents.
 
+## Install
+
+```sh
+pipx install maeh   # or: uv tool install maeh
+maeh init           # scaffold ~/.maeh (config + default guardrail + orchestrator AGENT.md)
+```
+
+`maeh init` writes `~/.maeh/{config.toml, guardrails/default.md, agents/orchestrator/AGENT.md}`
+and wires the default guardrail into every capsule. Re-run with `--force` to refresh the
+bundled templates (prior files are backed up to `*.bak`).
+
 ## Goal
 
 maeh aims to be:

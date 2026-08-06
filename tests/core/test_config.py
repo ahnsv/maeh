@@ -45,6 +45,11 @@ def test_set_overrides_apply_and_coerce(tmp_path):
     assert cfg.limits.max_concurrent_workspaces == 5  # coerced to int
 
 
+def test_set_override_single_guardrail_becomes_list(tmp_path):
+    cfg = load_config(tmp_path, overrides=["review.guardrails=/one/path.md"])
+    assert cfg.review.guardrails == ["/one/path.md"]  # not list("/one/path.md")
+
+
 def test_set_override_backend_is_validated(tmp_path):
     with pytest.raises(ValueError):
         load_config(tmp_path, overrides=["core.backend=screen"])
