@@ -1,5 +1,5 @@
 ---
-name: task-to-plan
+name: maeh-task-to-plan
 description: This skill should be used when the user asks to "turn this task into a plan", "make a plan tree", "task to plan", "plan this ticket", or hands over a tracker item or raw request that needs to become executable work. Interviews and explores the repo to compile a task into a maeh plan tree.
 version: 0.1.0
 ---

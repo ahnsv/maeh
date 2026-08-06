@@ -1,5 +1,5 @@
 ---
-name: review-the-increments
+name: maeh-review-the-increments
 description: This skill should be used when the user asks to "review the increments", "review the increment", "check the work against guardrails", "review the plan output", or when workspaces have produced increments that need an agent review before the human gate. Reviews increments individually and holistically against per-repo guidelines and custom guardrails, then emits a verdict.
 version: 0.1.0
 ---

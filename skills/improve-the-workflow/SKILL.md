@@ -1,5 +1,5 @@
 ---
-name: improve-the-workflow
+name: maeh-improve-the-workflow
 description: This skill should be used when the user asks to "improve the workflow", "run a retro", "how can the next run be better", "propose a workflow improvement", or after a run completes and its telemetry should drive the next run's improvement. Reads logs, metrics, retro and improvement notes to propose one concrete, evidence-backed improvement.
 version: 0.1.0
 ---

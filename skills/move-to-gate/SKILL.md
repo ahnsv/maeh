@@ -1,5 +1,5 @@
 ---
-name: move-to-gate
+name: maeh-move-to-gate
 description: This skill should be used when the user asks to "move to gate", "prepare the gate summary", "make the gate one-pager", "ready for human review", or when reviewed increments need a human gate. Produces a one-page interactive gate summary for holistic human review with inline comments.
 version: 0.1.0
 ---

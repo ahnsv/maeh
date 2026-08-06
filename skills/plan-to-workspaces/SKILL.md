@@ -1,5 +1,5 @@
 ---
-name: plan-to-workspaces
+name: maeh-plan-to-workspaces
 description: This skill should be used when the user asks to "assign workspaces", "plan to workspaces", "set up the workspaces", "start executing the plan", or is ready to turn plan-tree nodes into running development environments. Maps each executable node to a code location and opens its workspace via the configured backend.
 version: 0.1.0
 ---

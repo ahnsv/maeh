@@ -1,5 +1,5 @@
 ---
-name: change-of-plan
+name: maeh-change-of-plan
 description: This skill should be used when the user asks to "change the plan", "adjust the plan", "the review failed, fix the plan", "re-plan", or when a review verdict is failure and the plan tree needs to change or work needs to route back to Execute. Adjusts the plan tree or sends nodes back to execution.
 version: 0.1.0
 ---
