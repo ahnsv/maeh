@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from maeh.core import guardrails
 from maeh.core.models import Node, PlanTree
 from maeh.core.store import write_capsule
 
@@ -96,16 +97,11 @@ def capsule(tree: PlanTree, node_id: str, role: str, guardrails: list[str]) -> s
 def prepare(tree: PlanTree, node_id: str, config: Config, home: Path) -> dict[str, str]:
     """Render + write a capsule per role in the backend's pane set; return
     {role: absolute capsule path} for `{capsule}` substitution."""
-    # Fail closed: a configured guardrail that doesn't resolve would silently leave
-    # agents unguarded (e.g. $MAEH_HOME moved after `maeh init` wrote an absolute path).
-    for g in config.review.guardrails:
-        if not Path(g).expanduser().exists():
-            raise ValueError(
-                f"configured guardrail not found: {g} — agents would run unguarded; "
-                "fix [review].guardrails or run `maeh init`"
-            )
+    # Effective guardrails: explicit config (fail-closed if missing) + discovered
+    # $MAEH_HOME/guardrails/*.md. Empty is allowed; the CLI warns on it.
+    guardrail_paths = guardrails.resolve(config, home)
     paths: dict[str, str] = {}
     for role in config.workspace.panes_for(config.backend):
-        text = capsule(tree, node_id, role, config.review.guardrails)
+        text = capsule(tree, node_id, role, guardrail_paths)
         paths[role] = str(write_capsule(home, tree.root.id, node_id, role, text))
     return paths

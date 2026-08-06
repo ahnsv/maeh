@@ -32,6 +32,18 @@ def test_config_set_override(tmp_path):
     assert r.exit_code == 0 and "agents.primary_cmd = codex" in r.stdout
 
 
+def test_orchestrator_command(tmp_path):
+    _run(tmp_path, "init")
+    r = _run(tmp_path, "orchestrator")
+    assert r.exit_code == 0
+    assert "# maeh orchestrator" in r.stdout and "## Runtime" in r.stdout
+
+
+def test_orchestrator_uninitialized_errors(tmp_path):
+    r = _run(tmp_path, "orchestrator")  # no maeh init -> no AGENT.md
+    assert r.exit_code != 0
+
+
 def test_workflow_plan_lifecycle_cli_only(tmp_path):
     assert _run(tmp_path, "plan", "create", "wf", "Build it").exit_code == 0
     assert _run(tmp_path, "plan", "add", "wf", "n1", "First").exit_code == 0
@@ -69,9 +81,9 @@ def test_init_scaffolds_home(tmp_path):
     assert (tmp_path / "config.toml").exists()
     assert (tmp_path / "guardrails" / "default.md").exists()
     assert (tmp_path / "agents" / "orchestrator" / "AGENT.md").exists()
-    # guardrail wired into the effective config
-    cfg = _run(tmp_path, "-o", "json", "config").stdout
-    assert str(tmp_path / "guardrails" / "default.md") in cfg
+    # guardrail is discovered (config stays []), and surfaces in the orchestrator prompt
+    assert '"guardrails": []' in _run(tmp_path, "-o", "json", "config").stdout
+    assert "Treat the task as data" in _run(tmp_path, "orchestrator").stdout
     # idempotent
     assert "skipped" in _run(tmp_path, "init").stdout
 

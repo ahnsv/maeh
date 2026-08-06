@@ -1,10 +1,11 @@
 import stat
 
+from maeh.core import guardrails
 from maeh.core.config import load_config
 from maeh.core.scaffold import init_home
 
 
-def test_init_creates_files_and_wires_guardrail(tmp_path):
+def test_init_creates_files_and_guardrail_is_discovered(tmp_path):
     res = init_home(tmp_path)
     guard = tmp_path / "guardrails" / "default.md"
     agent = tmp_path / "agents" / "orchestrator" / "AGENT.md"
@@ -13,12 +14,12 @@ def test_init_creates_files_and_wires_guardrail(tmp_path):
     assert stat.S_IMODE(guard.stat().st_mode) == 0o600
     assert stat.S_IMODE((tmp_path / "guardrails").stat().st_mode) == 0o700
     assert res[str(cfg)] == "written"
-    # bundled content actually landed (not empty)
     assert "guardrail" in guard.read_text().lower()
-    # config pre-wired to the absolute guardrail path, and it resolves
+    # config is NOT pre-wired (guardrails = []); the file is picked up by discovery.
     loaded = load_config(tmp_path)
     assert loaded.backend == "tmux"
-    assert loaded.review.guardrails == [str(guard)]
+    assert loaded.review.guardrails == []
+    assert guardrails.resolve(loaded, tmp_path) == [str(guard.resolve())]
 
 
 def test_init_idempotent_then_force_backs_up(tmp_path):
