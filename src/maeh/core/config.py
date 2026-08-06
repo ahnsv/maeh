@@ -132,9 +132,10 @@ def load_config(home: Path | None = None, overrides: list[str] | None = None) ->
     for status, pair in data.get("tui", {}).get("status_format", {}).items():
         cfg.tui.status_format[status] = tuple(pair)
 
-    cfg.review = ReviewConfig(
-        guardrails=list(data.get("review", {}).get("guardrails", []))
-    )
+    _guardrails = data.get("review", {}).get("guardrails", [])
+    if isinstance(_guardrails, str):  # e.g. `--set review.guardrails=/one/path`
+        _guardrails = [_guardrails]
+    cfg.review = ReviewConfig(guardrails=list(_guardrails))
     cfg.limits = LimitsConfig(
         max_concurrent_workspaces=data.get("limits", {}).get(
             "max_concurrent_workspaces", cfg.limits.max_concurrent_workspaces
